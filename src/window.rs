@@ -7,7 +7,7 @@ use gtk4::prelude::*;
 use gtk4::{
     Align, Box as GtkBox, EventControllerKey, Label, ListBox, ListBoxRow,
     Orientation, Paned, Popover, PositionType, ScrolledWindow, SearchEntry,
-    SelectionMode, TextTag, TextView, TextWindowType,
+    SelectionMode, Separator, TextTag, TextView, TextWindowType,
 };
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
@@ -189,8 +189,8 @@ pub fn build_ui(app: &Application) {
     // --- Popover de autocompletado de wiki-links ---
     let autocomplete_state: Rc<RefCell<AutocompleteState>> =
         Rc::new(RefCell::new(AutocompleteState::default()));
-    let autocomplete_matches: Rc<RefCell<Vec<(String, String)>>> =
-        Rc::new(RefCell::new(Vec::new())); // (título, tags formateados)
+    let autocomplete_matches: Rc<RefCell<Vec<(String, String, String)>>> =
+        Rc::new(RefCell::new(Vec::new())); // (id, título, tags formateados)
 
     let autocomplete_list = ListBox::new();
     autocomplete_list.set_selection_mode(SelectionMode::Single);
@@ -201,11 +201,33 @@ pub fn build_ui(app: &Application) {
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .max_content_height(240)
         .propagate_natural_height(true)
+        .width_request(260)
         .build();
+
+    // Preview de las primeras líneas de la nota seleccionada
+    let autocomplete_preview = Label::new(None);
+    autocomplete_preview.set_halign(Align::Start);
+    autocomplete_preview.set_valign(Align::Start);
+    autocomplete_preview.set_wrap(true);
+    autocomplete_preview.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    autocomplete_preview.set_max_width_chars(80);
+    autocomplete_preview.set_width_chars(80);
+    autocomplete_preview.set_xalign(0.0);
+    autocomplete_preview.set_margin_start(10);
+    autocomplete_preview.set_margin_end(10);
+    autocomplete_preview.set_margin_top(8);
+    autocomplete_preview.set_margin_bottom(8);
+    autocomplete_preview.add_css_class("caption");
+    autocomplete_preview.add_css_class("dim-label");
+
+    let autocomplete_body = GtkBox::new(Orientation::Horizontal, 0);
+    autocomplete_body.append(&autocomplete_scroll);
+    autocomplete_body.append(&Separator::new(Orientation::Vertical));
+    autocomplete_body.append(&autocomplete_preview);
 
     let autocomplete_popover = Popover::new();
     autocomplete_popover.set_parent(&text_view);
-    autocomplete_popover.set_child(Some(&autocomplete_scroll));
+    autocomplete_popover.set_child(Some(&autocomplete_body));
     autocomplete_popover.set_position(PositionType::Bottom);
     autocomplete_popover.set_autohide(false);
 
@@ -216,6 +238,33 @@ pub fn build_ui(app: &Application) {
             if let Some(row) = autocomplete_list.row_at_index(idx as i32) {
                 autocomplete_list.select_row(Some(&row));
             }
+        }
+    };
+
+    // Muestra en el panel lateral las primeras 4 líneas del contenido de la nota candidata
+    let update_autocomplete_preview = {
+        let state = Rc::clone(&state);
+        let autocomplete_matches = Rc::clone(&autocomplete_matches);
+        let autocomplete_preview = autocomplete_preview.clone();
+
+        move |idx: usize| {
+            let note_id = {
+                let matches = autocomplete_matches.borrow();
+                matches.get(idx).map(|(id, _, _)| id.clone())
+            };
+
+            let preview_text = note_id.and_then(|id| {
+                let st = state.borrow();
+                st.storage.get_note(&id).map(|note| {
+                    note.content
+                        .lines()
+                        .take(4)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+            });
+
+            autocomplete_preview.set_text(preview_text.as_deref().unwrap_or(""));
         }
     };
 
@@ -269,6 +318,7 @@ pub fn build_ui(app: &Application) {
         let autocomplete_list = autocomplete_list.clone();
         let select_autocomplete_row = select_autocomplete_row.clone();
         let close_autocomplete = close_autocomplete.clone();
+        let update_autocomplete_preview = update_autocomplete_preview.clone();
 
         move || {
             let buffer = text_view.buffer();
@@ -304,7 +354,7 @@ pub fn build_ui(app: &Application) {
                 text_before_cursor[..absolute_byte_offset].chars().count() as i32;
 
             // Calcular matches difusos contra los títulos de las notas
-            let mut matches: Vec<(String, String, i32)> = {
+            let mut matches: Vec<(String, String, String, i32)> = {
                 let st = state.borrow();
                 st.storage
                     .notes
@@ -323,7 +373,7 @@ pub fn build_ui(app: &Application) {
                                         .join(" ")
                                 )
                             };
-                            (note.title.clone(), tags, score)
+                            (note.id.clone(), note.title.clone(), tags, score)
                         })
                     })
                     .collect()
@@ -334,7 +384,7 @@ pub fn build_ui(app: &Application) {
                 return;
             }
 
-            matches.sort_by(|a, b| a.2.cmp(&b.2).then_with(|| a.0.cmp(&b.0)));
+            matches.sort_by(|a, b| a.3.cmp(&b.3).then_with(|| a.1.cmp(&b.1)));
             matches.truncate(8);
 
             // Poblar la lista visual
@@ -342,7 +392,7 @@ pub fn build_ui(app: &Application) {
                 autocomplete_list.remove(&child);
             }
 
-            for (title, tags, _score) in &matches {
+            for (_id, title, tags, _score) in &matches {
                 let row = ListBoxRow::new();
                 let row_box = GtkBox::new(Orientation::Horizontal, 8);
                 row_box.set_margin_start(10);
@@ -350,7 +400,7 @@ pub fn build_ui(app: &Application) {
                 row_box.set_margin_top(4);
                 row_box.set_margin_bottom(4);
 
-                let title_label = Label::new(Some(&format!("{}", title)));
+                let title_label = Label::new(Some(&format!("# {}", title)));
                 title_label.set_halign(Align::Start);
                 title_label.set_hexpand(true);
 
@@ -365,10 +415,13 @@ pub fn build_ui(app: &Application) {
                 autocomplete_list.append(&row);
             }
 
-            *autocomplete_matches.borrow_mut() =
-                matches.into_iter().map(|(t, tags, _)| (t, tags)).collect();
+            *autocomplete_matches.borrow_mut() = matches
+                .into_iter()
+                .map(|(id, title, tags, _)| (id, title, tags))
+                .collect();
 
             select_autocomplete_row(0);
+            update_autocomplete_preview(0);
             *autocomplete_state.borrow_mut() = AutocompleteState {
                 active: true,
                 start_offset: start_char_offset,
@@ -396,7 +449,7 @@ pub fn build_ui(app: &Application) {
         move |idx: usize| {
             let title = {
                 let matches = autocomplete_matches.borrow();
-                matches.get(idx).map(|(t, _)| t.clone())
+                matches.get(idx).map(|(_, t, _)| t.clone())
             };
 
             let title = match title {
@@ -823,6 +876,7 @@ pub fn build_ui(app: &Application) {
         let autocomplete_state = Rc::clone(&autocomplete_state);
         let autocomplete_matches = Rc::clone(&autocomplete_matches);
         let select_autocomplete_row = select_autocomplete_row.clone();
+        let update_autocomplete_preview = update_autocomplete_preview.clone();
         let insert_autocomplete_selection = insert_autocomplete_selection.clone();
         let close_autocomplete = close_autocomplete.clone();
 
@@ -841,6 +895,7 @@ pub fn build_ui(app: &Application) {
                         let sel = ac.selected;
                         drop(ac);
                         select_autocomplete_row(sel);
+                        update_autocomplete_preview(sel);
                         return glib::Propagation::Stop;
                     }
                     Key::Up => {
@@ -849,6 +904,7 @@ pub fn build_ui(app: &Application) {
                         let sel = ac.selected;
                         drop(ac);
                         select_autocomplete_row(sel);
+                        update_autocomplete_preview(sel);
                         return glib::Propagation::Stop;
                     }
                     Key::Return | Key::KP_Enter | Key::Tab => {
