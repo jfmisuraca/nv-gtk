@@ -120,6 +120,27 @@ pub fn build_ui(app: &Application) {
     paned.set_end_child(Some(&editor_box));
     window.set_content(Some(&paned));
 
+    // Flushes any pending debounced save immediately (used when switching notes or closing)
+    let flush_pending_save = {
+        let state = Rc::clone(&state);
+        let text_view = text_view.clone();
+
+        move || {
+            let mut st = state.borrow_mut();
+
+            if let Some(source_id) = st.save_timeout_source.take() {
+                source_id.remove();
+
+                if let Some(current_id) = st.current_note_id.clone() {
+                    let buffer = text_view.buffer();
+                    let (start, end) = buffer.bounds();
+                    let text = buffer.text(&start, &end, true).to_string();
+                    st.storage.save_note(&current_id, &text);
+                }
+            }
+        }
+    };
+
     // Helper functions for UI refresh
     let populate_list = {
         let state = Rc::clone(&state);
@@ -177,8 +198,12 @@ pub fn build_ui(app: &Application) {
         let text_view = text_view.clone();
         let list_box = list_box.clone();
         let info_label = info_label.clone();
+        let flush_pending_save = flush_pending_save.clone();
 
         move |target_id: &str| {
+            // save pending changes when swithing windows
+            flush_pending_save();
+
             let mut content_to_set = None;
             let mut pos_to_select = None;
 
@@ -312,6 +337,7 @@ pub fn build_ui(app: &Application) {
         let state = Rc::clone(&state);
         let text_view = text_view.clone();
         let info_label = info_label.clone();
+        let flush_pending_save = flush_pending_save.clone();
 
         move |_, row| {
             let note_data = if let Some(row) = row {
@@ -331,6 +357,8 @@ pub fn build_ui(app: &Application) {
             };
 
             if let Some((id, content)) = note_data {
+                flush_pending_save();
+
                 if let Ok(mut st) = state.try_borrow_mut() {
                     st.current_note_id = Some(id);
                 }
@@ -349,20 +377,45 @@ pub fn build_ui(app: &Application) {
         let info_label = info_label.clone();
 
         move |buffer| {
-            if let Ok(mut st) = state.try_borrow_mut() {
-                if st.is_updating_ui {
-                    return;
-                }
-                if let Some(current_id) = st.current_note_id.clone() {
-                    let (start, end) = buffer.bounds();
-                    let text = buffer.text(&start, &end, true).to_string();
+            let mut st = state.borrow_mut();
+            if st.is_updating_ui {
+                return;
+            }
 
-                    let words = text.split_whitespace().count();
-                    let chars = text.chars().count();
-                    info_label.set_text(&format!("{} palabras | {} caracteres", words, chars));
+            let text = {
+                let (start, end) = buffer.bounds();
+                buffer.text(&start, &end, true).to_string()
+            };
 
-                    st.storage.save_note(&current_id, &text);
-                }
+            let words = text.split_whitespace().count();
+            let chars = text.chars().count();
+            info_label.set_text(&format!("{} palabras | {} caracteres", words, chars));
+
+            // Cancelar el guardado pendiente anterior, si había
+            if let Some(source_id) = st.save_timeout_source.take() {
+                source_id.remove();
+            }
+
+            if let Some(current_id) = st.current_note_id.clone() {
+                let delay_ms = st.config.auto_save_ms;
+                let state_for_timeout = Rc::clone(&state);
+                let buffer_for_timeout = buffer.clone();
+
+                let source_id = glib::timeout_add_local(
+                    std::time::Duration::from_millis(delay_ms),
+                    move || {
+                        let (start, end) = buffer_for_timeout.bounds();
+                        let text = buffer_for_timeout.text(&start, &end, true).to_string();
+
+                        let mut st = state_for_timeout.borrow_mut();
+                        st.storage.save_note(&current_id, &text);
+                        st.save_timeout_source = None;
+
+                        glib::ControlFlow::Break // ejecutar una sola vez
+                    },
+                );
+
+                st.save_timeout_source = Some(source_id);
             }
         }
     });
@@ -408,8 +461,6 @@ pub fn build_ui(app: &Application) {
         }
     };
 
-
-
     // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Up/Down arrow list navigation)
     let key_controller = EventControllerKey::new();
     key_controller.connect_key_pressed({
@@ -451,5 +502,14 @@ pub fn build_ui(app: &Application) {
     });
 
     window.add_controller(key_controller);
+
+    window.connect_close_request({
+        let flush_pending_save = flush_pending_save.clone();
+        move |_| {
+            flush_pending_save();
+            glib::Propagation::Proceed
+        }
+    });
+
     window.present();
 }
