@@ -866,6 +866,28 @@ pub fn build_ui(app: &Application) {
         }
     };
 
+    // Mueve la selección de la lista de notas hacia abajo (+1) o arriba (-1)
+    let move_list_selection = {
+        let list_box = list_box.clone();
+
+        move |delta: i32| {
+            let current_index = list_box
+                .selected_row()
+                .map(|row| row.index())
+                .unwrap_or(-1);
+
+            let target_index = current_index + delta;
+            if target_index < 0 {
+                return;
+            }
+
+            if let Some(row) = list_box.row_at_index(target_index) {
+                list_box.select_row(Some(&row));
+                row.grab_focus();
+            }
+        }
+    };
+
     // Controlador de teclado del editor: maneja el popover de autocompletado
     // (↑/↓/Enter/Tab/Esc) y, si no está activo, Ctrl+Enter para navegar wiki-links existentes.
     let key_controller_editor = EventControllerKey::new();
@@ -961,11 +983,20 @@ pub fn build_ui(app: &Application) {
         let _list_box = list_box.clone();
         let create_new_empty_note = create_new_empty_note.clone();
         let delete_current_note = delete_current_note.clone();
+        let move_list_selection = move_list_selection.clone();
 
         move |_, key, _, modifier| {
             let is_ctrl = modifier.contains(gdk::ModifierType::CONTROL_MASK);
 
             match key {
+                Key::j if is_ctrl => {
+                    move_list_selection(1);
+                    glib::Propagation::Stop
+                }
+                Key::k if is_ctrl => {
+                    move_list_selection(-1);
+                    glib::Propagation::Stop
+                }
                 Key::l if is_ctrl => {
                     search_entry.grab_focus();
                     search_entry.select_region(0, -1);
