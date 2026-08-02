@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Notational Velocity GTK
+Comment=Búsqueda instantánea y toma de notas
+Exec=nv-gtk
+Icon=text-editor
+Terminal=false
+Type=Application
+Categories=Utility;TextEditor;Office;
+Keywords=notes;markdown;notational;velocity;text;
