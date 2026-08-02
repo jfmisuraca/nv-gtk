@@ -7,7 +7,7 @@ use gtk4::prelude::*;
 use gtk4::{
     Align, Box as GtkBox, EventControllerKey, Label, ListBox, ListBoxRow,
     Orientation, Paned, ScrolledWindow, SearchEntry, SelectionMode,
-    TextView,
+    TextTag, TextView,
 };
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
@@ -15,6 +15,7 @@ use libadwaita::{Application, ApplicationWindow};
 use crate::config::Config;
 use crate::search::search_notes;
 use crate::storage::StorageManager;
+use crate::wiki_link::{extract_wiki_links, WikiLink};
 
 pub struct AppState {
     pub config: Config,
@@ -23,6 +24,7 @@ pub struct AppState {
     pub current_note_id: Option<String>,
     pub save_timeout_source: Option<glib::SourceId>,
     pub is_updating_ui: bool,
+    pub current_wiki_links: Vec<WikiLink>,
 }
 
 pub fn build_ui(app: &Application) {
@@ -37,6 +39,7 @@ pub fn build_ui(app: &Application) {
         current_note_id: None,
         save_timeout_source: None,
         is_updating_ui: false,
+        current_wiki_links: Vec::new(),
     }));
 
     let window = ApplicationWindow::builder()
@@ -120,6 +123,43 @@ pub fn build_ui(app: &Application) {
     paned.set_end_child(Some(&editor_box));
     window.set_content(Some(&paned));
 
+    // Tag visual para los wiki-links (subrayado + color)
+    let wiki_link_tag = TextTag::builder()
+        .name("wiki-link")
+        .underline(gtk4::pango::Underline::Single)
+        .foreground("#4a9eff")
+        .build();
+    text_view.buffer().tag_table().add(&wiki_link_tag);
+
+    // Recalcula los wiki-links del buffer actual, los guarda en el estado y los resalta visualmente
+    let refresh_wiki_links = {
+        let state = Rc::clone(&state);
+        let text_view = text_view.clone();
+        let wiki_link_tag = wiki_link_tag.clone();
+
+        move || {
+            let buffer = text_view.buffer();
+            let (start, end) = buffer.bounds();
+            let text = buffer.text(&start, &end, true).to_string();
+
+            let links = extract_wiki_links(&text);
+
+            // Limpiar tags viejos y volver a aplicar en las posiciones nuevas
+            buffer.remove_tag(&wiki_link_tag, &start, &end);
+            for link in &links {
+                // start/end de WikiLink son offsets en bytes sobre &str;
+                // TextBuffer::iter_at_offset espera offset en caracteres, así que convertimos.
+                let char_start = text[..link.start].chars().count() as i32;
+                let char_end = text[..link.end].chars().count() as i32;
+                let iter_start = buffer.iter_at_offset(char_start);
+                let iter_end = buffer.iter_at_offset(char_end);
+                buffer.apply_tag(&wiki_link_tag, &iter_start, &iter_end);
+            }
+
+            state.borrow_mut().current_wiki_links = links;
+        }
+    };
+
     // Flushes any pending debounced save immediately (used when switching notes or closing)
     let flush_pending_save = {
         let state = Rc::clone(&state);
@@ -199,9 +239,10 @@ pub fn build_ui(app: &Application) {
         let list_box = list_box.clone();
         let info_label = info_label.clone();
         let flush_pending_save = flush_pending_save.clone();
+        let refresh_wiki_links = refresh_wiki_links.clone();
 
         move |target_id: &str| {
-            // save pending changes when swithing windows
+            // Guardar cualquier cambio pendiente de la nota anterior antes de cambiar
             flush_pending_save();
 
             let mut content_to_set = None;
@@ -238,6 +279,8 @@ pub fn build_ui(app: &Application) {
                 let mut st = state.borrow_mut();
                 st.is_updating_ui = false;
             }
+
+            refresh_wiki_links();
         }
     };
 
@@ -265,6 +308,42 @@ pub fn build_ui(app: &Application) {
             if let Some(first_id) = first_id {
                 select_note_by_id(&first_id);
             }
+        }
+    };
+
+    // Navega hacia la nota referenciada por un wiki-link; la crea si no existe todavía
+    let navigate_to_wiki_target = {
+        let state = Rc::clone(&state);
+        let populate_list = populate_list.clone();
+        let select_note_by_id = select_note_by_id.clone();
+        let search_entry = search_entry.clone();
+
+        move |target: &str| {
+            let target_clean = target.trim();
+            if target_clean.is_empty() {
+                return;
+            }
+
+            let action = {
+                let mut st = state.borrow_mut();
+                if let Some(existing) = st
+                    .storage
+                    .notes
+                    .iter()
+                    .find(|n| n.title.eq_ignore_ascii_case(target_clean))
+                {
+                    existing.id.clone()
+                } else {
+                    let new_note = st.storage.create_note(target_clean);
+                    let new_id = new_note.id.clone();
+                    st.filtered_indices = st.storage.notes.iter().map(|n| n.id.clone()).collect();
+                    new_id
+                }
+            };
+
+            search_entry.set_text("");
+            populate_list();
+            select_note_by_id(&action);
         }
     };
 
@@ -338,6 +417,7 @@ pub fn build_ui(app: &Application) {
         let text_view = text_view.clone();
         let info_label = info_label.clone();
         let flush_pending_save = flush_pending_save.clone();
+        let refresh_wiki_links = refresh_wiki_links.clone();
 
         move |_, row| {
             let note_data = if let Some(row) = row {
@@ -357,6 +437,7 @@ pub fn build_ui(app: &Application) {
             };
 
             if let Some((id, content)) = note_data {
+                // Guardar cualquier cambio pendiente de la nota anterior antes de cambiar
                 flush_pending_save();
 
                 if let Ok(mut st) = state.try_borrow_mut() {
@@ -367,14 +448,17 @@ pub fn build_ui(app: &Application) {
 
                 text_view.buffer().set_text(&content);
                 info_label.set_text(&format!("{} palabras | {} caracteres", words, chars));
+
+                refresh_wiki_links();
             }
         }
     });
 
-    // Auto-Save when editing TextBuffer
+    // Auto-Save when editing TextBuffer (debounced usando config.auto_save_ms)
     text_view.buffer().connect_changed({
         let state = Rc::clone(&state);
         let info_label = info_label.clone();
+        let refresh_wiki_links = refresh_wiki_links.clone();
 
         move |buffer| {
             let mut st = state.borrow_mut();
@@ -417,6 +501,9 @@ pub fn build_ui(app: &Application) {
 
                 st.save_timeout_source = Some(source_id);
             }
+
+            drop(st);
+            refresh_wiki_links();
         }
     });
 
@@ -461,7 +548,47 @@ pub fn build_ui(app: &Application) {
         }
     };
 
-    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Up/Down arrow list navigation)
+    // Ctrl+Enter dentro del editor: si el cursor está sobre un [[wiki-link]], navega a esa nota
+    let key_controller_editor = EventControllerKey::new();
+    key_controller_editor.connect_key_pressed({
+        let state = Rc::clone(&state);
+        let text_view = text_view.clone();
+        let navigate_to_wiki_target = navigate_to_wiki_target.clone();
+
+        move |_, key, _, modifier| {
+            let is_ctrl = modifier.contains(gdk::ModifierType::CONTROL_MASK);
+
+            if is_ctrl && (key == Key::Return || key == Key::KP_Enter) {
+                let buffer = text_view.buffer();
+                let cursor_offset = buffer.cursor_position();
+
+                let target = {
+                    let st = state.borrow();
+                    st.current_wiki_links.iter().find_map(|link| {
+                        let (s, e) = buffer.bounds();
+                        let text = buffer.text(&s, &e, true).to_string();
+                        let char_start = text[..link.start].chars().count() as i32;
+                        let char_end = text[..link.end].chars().count() as i32;
+                        if cursor_offset >= char_start && cursor_offset <= char_end {
+                            Some(link.target.clone())
+                        } else {
+                            None
+                        }
+                    })
+                };
+
+                if let Some(target) = target {
+                    navigate_to_wiki_target(&target);
+                    return glib::Propagation::Stop;
+                }
+            }
+
+            glib::Propagation::Proceed
+        }
+    });
+    text_view.add_controller(key_controller_editor);
+
+    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D)
     let key_controller = EventControllerKey::new();
     key_controller.connect_key_pressed({
         let search_entry = search_entry.clone();
@@ -503,6 +630,7 @@ pub fn build_ui(app: &Application) {
 
     window.add_controller(key_controller);
 
+    // Guardar cualquier cambio pendiente al cerrar la ventana
     window.connect_close_request({
         let flush_pending_save = flush_pending_save.clone();
         move |_| {
