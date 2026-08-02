@@ -127,7 +127,7 @@ pub fn build_ui(app: &Application) {
 
     let list_scroll = ScrolledWindow::builder()
         .child(&list_box)
-        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .hscrollbar_policy(gtk4::PolicyType::Automatic)
         .vexpand(true)
         .build();
 
