@@ -602,7 +602,6 @@ pub fn build_ui(app: &Application) {
         let state = Rc::clone(&state);
         let search_entry = search_entry.clone();
         let populate_list = populate_list.clone();
-        let select_note_by_id = select_note_by_id.clone();
 
         move || {
             let query = search_entry.text().to_string();
@@ -612,16 +611,6 @@ pub fn build_ui(app: &Application) {
             }
 
             populate_list();
-
-            // Auto select first match if any
-            let first_id = {
-                let st = state.borrow();
-                st.filtered_indices.first().cloned()
-            };
-
-            if let Some(first_id) = first_id {
-                select_note_by_id(&first_id);
-            }
         }
     };
 
@@ -698,74 +687,40 @@ pub fn build_ui(app: &Application) {
 
             let action = {
                 let mut st = state.borrow_mut();
-                if let Some(existing) = st
-                    .storage
-                    .notes
-                    .iter()
-                    .find(|n| n.title.eq_ignore_ascii_case(query_clean))
-                {
-                    Some((true, existing.id.clone()))
-                } else if !st.filtered_indices.is_empty() {
-                    Some((false, String::new()))
+                if let Some(best_match_id) = st.filtered_indices.first().cloned() {
+                    (true, best_match_id)
                 } else {
                     let new_note = st.storage.create_note(query_clean);
                     let new_id = new_note.id.clone();
                     st.filtered_indices = st.storage.notes.iter().map(|n| n.id.clone()).collect();
-                    Some((true, new_id))
+                    (true, new_id)
                 }
             };
 
-            if let Some((should_select, id)) = action {
-                if should_select {
-                    populate_list();
-                    select_note_by_id(&id);
-                }
-                text_view.grab_focus();
+            let (should_select, id) = action;
+            if should_select {
+                populate_list();
+                select_note_by_id(&id);
             }
+            text_view.grab_focus();
         }
     });
 
-    // Connect ListBox selection changed
-    list_box.connect_row_selected({
+    // Al activar una fila (Enter o doble clic) se carga la nota en el editor.
+    // Navegar con las flechas solo mueve la selección visual, sin abrir la nota.
+    list_box.connect_row_activated({
         let state = Rc::clone(&state);
-        let text_view = text_view.clone();
-        let info_label = info_label.clone();
-        let flush_pending_save = flush_pending_save.clone();
-        let refresh_wiki_links = refresh_wiki_links.clone();
-        let close_autocomplete = close_autocomplete.clone();
+        let select_note_by_id = select_note_by_id.clone();
 
         move |_, row| {
-            let note_data = if let Some(row) = row {
-                let idx = row.index() as usize;
-                if let Ok(st) = state.try_borrow() {
-                    if st.is_updating_ui {
-                        return;
-                    }
-                    st.filtered_indices.get(idx).and_then(|id| {
-                        st.storage.get_note(id).map(|n| (n.id.clone(), n.content.clone()))
-                    })
-                } else {
-                    None
-                }
-            } else {
-                None
+            let idx = row.index() as usize;
+            let target_id = {
+                let st = state.borrow();
+                st.filtered_indices.get(idx).cloned()
             };
 
-            if let Some((id, content)) = note_data {
-                close_autocomplete();
-                // Guardar cualquier cambio pendiente de la nota anterior antes de cambiar
-                flush_pending_save();
-
-                if let Ok(mut st) = state.try_borrow_mut() {
-                    st.current_note_id = Some(id);
-                }
-                let words = content.split_whitespace().count();
-                let chars = content.chars().count();
-
-                text_view.buffer().set_text(&content);
-                info_label.set_text(&format!("{} palabras | {} caracteres", words, chars));
-
-                refresh_wiki_links();
+            if let Some(id) = target_id {
+                select_note_by_id(&id);
             }
         }
     });
@@ -866,9 +821,11 @@ pub fn build_ui(app: &Application) {
         }
     };
 
-    // Mueve la selección de la lista de notas hacia abajo (+1) o arriba (-1)
+    // Mueve la selección de la lista de notas hacia abajo (+1) o arriba (-1) y la abre
     let move_list_selection = {
+        let state = Rc::clone(&state);
         let list_box = list_box.clone();
+        let select_note_by_id = select_note_by_id.clone();
 
         move |delta: i32| {
             let current_index = list_box
@@ -884,6 +841,15 @@ pub fn build_ui(app: &Application) {
             if let Some(row) = list_box.row_at_index(target_index) {
                 list_box.select_row(Some(&row));
                 row.grab_focus();
+
+                let idx = target_index as usize;
+                let target_id = {
+                    let st = state.borrow();
+                    st.filtered_indices.get(idx).cloned()
+                };
+                if let Some(id) = target_id {
+                    select_note_by_id(&id);
+                }
             }
         }
     };
