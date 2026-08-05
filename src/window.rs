@@ -605,6 +605,12 @@ pub fn build_ui(app: &Application) {
             }
 
             refresh_wiki_links();
+
+            // Mover el foco al editor con el cursor al final del texto
+            let buffer = text_view.buffer();
+            let end_iter = buffer.end_iter();
+            buffer.place_cursor(&end_iter);
+            text_view.grab_focus();
         }
     };
 
@@ -624,11 +630,10 @@ pub fn build_ui(app: &Application) {
         }
     };
 
-    // Navega hacia la nota referenciada por un wiki-link; la crea si no existe todavía
-    let navigate_to_wiki_target = {
+    // Al hacer Ctrl+Enter sobre un wiki-link, pone su texto en la barra de búsqueda y filtra
+    let search_wiki_target = {
         let state = Rc::clone(&state);
         let populate_list = populate_list.clone();
-        let select_note_by_id = select_note_by_id.clone();
         let search_entry = search_entry.clone();
 
         move |target: &str| {
@@ -637,26 +642,15 @@ pub fn build_ui(app: &Application) {
                 return;
             }
 
-            let action = {
-                let mut st = state.borrow_mut();
-                if let Some(existing) = st
-                    .storage
-                    .notes
-                    .iter()
-                    .find(|n| n.title.eq_ignore_ascii_case(target_clean))
-                {
-                    existing.id.clone()
-                } else {
-                    let new_note = st.storage.create_note(target_clean);
-                    let new_id = new_note.id.clone();
-                    st.filtered_indices = st.storage.notes.iter().map(|n| n.id.clone()).collect();
-                    new_id
-                }
-            };
+            search_entry.set_text(target_clean);
+            search_entry.grab_focus();
+            search_entry.select_region(0, -1);
 
-            search_entry.set_text("");
+            {
+                let mut st = state.borrow_mut();
+                st.filtered_indices = search_notes(&st.storage.notes, target_clean);
+            }
             populate_list();
-            select_note_by_id(&action);
         }
     };
 
@@ -870,7 +864,7 @@ pub fn build_ui(app: &Application) {
     key_controller_editor.connect_key_pressed({
         let state = Rc::clone(&state);
         let text_view = text_view.clone();
-        let navigate_to_wiki_target = navigate_to_wiki_target.clone();
+        let search_wiki_target = search_wiki_target.clone();
         let autocomplete_state = Rc::clone(&autocomplete_state);
         let autocomplete_matches = Rc::clone(&autocomplete_matches);
         let select_autocomplete_row = select_autocomplete_row.clone();
@@ -942,7 +936,7 @@ pub fn build_ui(app: &Application) {
                 };
 
                 if let Some(target) = target {
-                    navigate_to_wiki_target(&target);
+                    search_wiki_target(&target);
                     return glib::Propagation::Stop;
                 }
             }
