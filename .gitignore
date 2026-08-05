@@ -4,4 +4,4 @@ target
 **/mutants.out*/
 pkg/*
 target/*
-*/.zst
+*.pkg.tar.zst
