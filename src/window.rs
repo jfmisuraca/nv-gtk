@@ -127,7 +127,7 @@ pub fn build_ui(app: &Application) {
 
     let list_scroll = ScrolledWindow::builder()
         .child(&list_box)
-        .hscrollbar_policy(gtk4::PolicyType::Automatic)
+        .hscrollbar_policy(gtk4::PolicyType::Never)
         .vexpand(true)
         .build();
 
@@ -519,14 +519,24 @@ pub fn build_ui(app: &Application) {
                     row_box.set_margin_bottom(6);
 
                     let title_label = Label::new(Some(&note.title));
-                    title_label.set_halign(Align::Start);
+                    title_label.set_halign(Align::Fill);
+                    title_label.set_xalign(0.0);
                     title_label.add_css_class("heading");
+                    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                    title_label.set_max_width_chars(1);
+                    title_label.set_hexpand(true);
+                    title_label.set_tooltip_text(Some(&note.title));
 
                     let meta_str = format!("{} • {}", note.formatted_date(), note.tags.join(" "));
                     let meta_label = Label::new(Some(&meta_str));
-                    meta_label.set_halign(Align::Start);
+                    meta_label.set_halign(Align::Fill);
+                    meta_label.set_xalign(0.0);
                     meta_label.add_css_class("caption");
                     meta_label.add_css_class("dim-label");
+                    meta_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+                    meta_label.set_max_width_chars(1);
+                    meta_label.set_hexpand(true);
+                    meta_label.set_tooltip_text(Some(&meta_str));
 
                     row_box.append(&title_label);
                     row_box.append(&meta_label);
