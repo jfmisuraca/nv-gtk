@@ -527,7 +527,12 @@ pub fn build_ui(app: &Application) {
                     title_label.set_hexpand(true);
                     title_label.set_tooltip_text(Some(&note.title));
 
-                    let meta_str = format!("{} • {}", note.formatted_date(), note.tags.join(" "));
+                    let meta_str = format!(
+                        "{} (creada {}) • {}",
+                        note.formatted_date(),
+                        note.formatted_created_date(),
+                        note.tags.join(" ")
+                    );
                     let meta_label = Label::new(Some(&meta_str));
                     meta_label.set_halign(Align::Fill);
                     meta_label.set_xalign(0.0);
