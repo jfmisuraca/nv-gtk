@@ -1,92 +1,21 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use chrono::Local;
 use gtk4::gdk::{self, Key};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, CssProvider, EventControllerKey, Label, ListBox, ListBoxRow,
-    Orientation, Overlay, Paned, ScrolledWindow, SearchEntry,
-    SelectionMode, Separator, TextTag, TextView, TextWindowType,
+    Align, Box as GtkBox, EventControllerKey, Label, ListBox, ListBoxRow, Orientation, Overlay,
+    Paned, ScrolledWindow, SearchEntry, SelectionMode, TextView,
 };
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
 
+use crate::app_state::{timestamp_title, AppState};
 use crate::config::Config;
 use crate::search::search_notes;
 use crate::storage::StorageManager;
-use crate::wiki_link::{extract_wiki_links, WikiLink};
-
-pub struct AppState {
-    pub config: Config,
-    pub storage: StorageManager,
-    pub filtered_indices: Vec<String>,
-    pub current_note_id: Option<String>,
-    pub save_timeout_source: Option<glib::SourceId>,
-    pub is_updating_ui: bool,
-    pub current_wiki_links: Vec<WikiLink>,
-}
-
-// Estado del popover de autocompletado de wiki-links
-#[derive(Clone, Copy)]
-struct AutocompleteState {
-    active: bool,
-    start_offset: i32, // offset (en caracteres) justo después de "[["
-    selected: usize,
-}
-
-impl Default for AutocompleteState {
-    fn default() -> Self {
-        Self {
-            active: false,
-            start_offset: 0,
-            selected: 0,
-        }
-    }
-}
-
-/// Coincidencia difusa tipo "subsequence": todos los caracteres de `query` deben
-/// aparecer en `target` en el mismo orden, aunque no estén seguidos.
-/// Devuelve `None` si no matchea, o `Some(score)` si matchea (menor score = mejor).
-fn fuzzy_score(query: &str, target: &str) -> Option<i32> {
-    if query.is_empty() {
-        return Some(0);
-    }
-
-    let query_lower = query.to_lowercase();
-    let target_lower = target.to_lowercase();
-
-    let mut score: i32 = 0;
-    let mut last_match: Option<usize> = None;
-    let mut q_chars = query_lower.chars().peekable();
-
-    for (ti, tc) in target_lower.chars().enumerate() {
-        if let Some(&qc) = q_chars.peek() {
-            if tc == qc {
-                match last_match {
-                    Some(last) => score += (ti - last - 1) as i32, // penaliza huecos entre matches
-                    None => score += ti as i32, // penaliza empezar lejos del principio
-                }
-                last_match = Some(ti);
-                q_chars.next();
-            }
-        } else {
-            break;
-        }
-    }
-
-    if q_chars.peek().is_some() {
-        None // no todos los caracteres de la query aparecieron
-    } else {
-        Some(score)
-    }
-}
-
-/// Genera un título único basado en la fecha/hora actual: YYYYMMDD-HHMM
-fn timestamp_title() -> String {
-    Local::now().format("%Y%m%d-%H%M").to_string()
-}
+use crate::wiki_autocomplete::WikiAutocomplete;
 
 pub fn build_ui(app: &Application) {
     let config = Config::load();
@@ -186,382 +115,6 @@ pub fn build_ui(app: &Application) {
     paned.set_end_child(Some(&editor_box));
     window.set_content(Some(&paned));
 
-    // Tag visual para los wiki-links (subrayado + color)
-    let wiki_link_tag = TextTag::builder()
-        .name("wiki-link")
-        .underline(gtk4::pango::Underline::Single)
-        .foreground("#4a9eff")
-        .build();
-    text_view.buffer().tag_table().add(&wiki_link_tag);
-
-    // --- Popover de autocompletado de wiki-links ---
-    let autocomplete_state: Rc<RefCell<AutocompleteState>> =
-        Rc::new(RefCell::new(AutocompleteState::default()));
-    let autocomplete_matches: Rc<RefCell<Vec<(String, String, String)>>> =
-        Rc::new(RefCell::new(Vec::new())); // (id, título, tags formateados)
-
-    let autocomplete_list = ListBox::new();
-    autocomplete_list.set_selection_mode(SelectionMode::Single);
-    autocomplete_list.add_css_class("navigation-sidebar");
-
-    let autocomplete_scroll = ScrolledWindow::builder()
-        .child(&autocomplete_list)
-        .hscrollbar_policy(gtk4::PolicyType::Never)
-        .max_content_height(240)
-        .propagate_natural_height(true)
-        .width_request(260)
-        .build();
-
-    // Preview de las primeras líneas de la nota seleccionada
-    let autocomplete_preview = Label::new(None);
-    autocomplete_preview.set_halign(Align::Start);
-    autocomplete_preview.set_valign(Align::Start);
-    autocomplete_preview.set_wrap(true);
-    autocomplete_preview.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-    autocomplete_preview.set_max_width_chars(80);
-    autocomplete_preview.set_xalign(0.0);
-    autocomplete_preview.set_margin_start(10);
-    autocomplete_preview.set_margin_end(10);
-    autocomplete_preview.set_margin_top(8);
-    autocomplete_preview.set_margin_bottom(8);
-    autocomplete_preview.add_css_class("caption");
-    autocomplete_preview.add_css_class("dim-label");
-
-    let autocomplete_body = GtkBox::new(Orientation::Horizontal, 0);
-    autocomplete_body.append(&autocomplete_scroll);
-    autocomplete_body.append(&Separator::new(Orientation::Vertical));
-    autocomplete_body.append(&autocomplete_preview);
-    autocomplete_body.add_css_class("nv-autocomplete-panel");
-    autocomplete_body.set_halign(Align::Start);
-    autocomplete_body.set_valign(Align::Start);
-    autocomplete_body.set_visible(false);
-
-    // CSS propio para que el panel tenga fondo y borde (al no ser un Popover nativo,
-    // no hereda el estilo ".popover" del tema automáticamente)
-    let css_provider = CssProvider::new();
-    css_provider.load_from_data(
-        ".nv-autocomplete-panel { \
-            background-color: @theme_base_color; \
-            border: 1px solid alpha(@borders, 0.8); \
-            border-radius: 8px; \
-        }",
-    );
-    if let Some(display) = gtk4::gdk::Display::default() {
-        gtk4::style_context_add_provider_for_display(
-            &display,
-            &css_provider,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
-    }
-
-    editor_overlay.add_overlay(&autocomplete_body);
-
-    // Resalta visualmente la fila seleccionada dentro del popover
-    let select_autocomplete_row = {
-        let autocomplete_list = autocomplete_list.clone();
-        move |idx: usize| {
-            if let Some(row) = autocomplete_list.row_at_index(idx as i32) {
-                autocomplete_list.select_row(Some(&row));
-            }
-        }
-    };
-
-    // Muestra en el panel lateral las primeras 4 líneas del contenido de la nota candidata
-    let update_autocomplete_preview = {
-        let state = Rc::clone(&state);
-        let autocomplete_matches = Rc::clone(&autocomplete_matches);
-        let autocomplete_preview = autocomplete_preview.clone();
-
-        move |idx: usize| {
-            let note_id = {
-                let matches = autocomplete_matches.borrow();
-                matches.get(idx).map(|(id, _, _)| id.clone())
-            };
-
-            let preview_text = note_id.and_then(|id| {
-                let st = state.borrow();
-                st.storage.get_note(&id).map(|note| {
-                    note.content
-                        .lines()
-                        .take(4)
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
-            });
-
-            autocomplete_preview.set_text(preview_text.as_deref().unwrap_or(""));
-        }
-    };
-
-    // Cierra el panel de autocompletado sin insertar nada
-    let close_autocomplete = {
-        let autocomplete_body = autocomplete_body.clone();
-        let autocomplete_state = Rc::clone(&autocomplete_state);
-        move || {
-            autocomplete_body.set_visible(false);
-            autocomplete_state.borrow_mut().active = false;
-        }
-    };
-
-    // Recalcula los wiki-links del buffer actual, los guarda en el estado y los resalta visualmente
-    let refresh_wiki_links = {
-        let state = Rc::clone(&state);
-        let text_view = text_view.clone();
-        let wiki_link_tag = wiki_link_tag.clone();
-
-        move || {
-            let buffer = text_view.buffer();
-            let (start, end) = buffer.bounds();
-            let text = buffer.text(&start, &end, true).to_string();
-
-            let links = extract_wiki_links(&text);
-
-            // Limpiar tags viejos y volver a aplicar en las posiciones nuevas
-            buffer.remove_tag(&wiki_link_tag, &start, &end);
-            for link in &links {
-                // start/end de WikiLink son offsets en bytes sobre &str;
-                // TextBuffer::iter_at_offset espera offset en caracteres, así que convertimos.
-                let char_start = text[..link.start].chars().count() as i32;
-                let char_end = text[..link.end].chars().count() as i32;
-                let iter_start = buffer.iter_at_offset(char_start);
-                let iter_end = buffer.iter_at_offset(char_end);
-                buffer.apply_tag(&wiki_link_tag, &iter_start, &iter_end);
-            }
-
-            state.borrow_mut().current_wiki_links = links;
-        }
-    };
-
-    // Detecta si el cursor está dentro de un "[[query" sin cerrar, y si es así
-    // abre/actualiza el popover con las notas candidatas (fuzzy match).
-    let update_autocomplete = {
-        let state = Rc::clone(&state);
-        let text_view = text_view.clone();
-        let autocomplete_state = Rc::clone(&autocomplete_state);
-        let autocomplete_matches = Rc::clone(&autocomplete_matches);
-        let autocomplete_body = autocomplete_body.clone();
-        let editor_overlay = editor_overlay.clone();
-        let autocomplete_list = autocomplete_list.clone();
-        let select_autocomplete_row = select_autocomplete_row.clone();
-        let close_autocomplete = close_autocomplete.clone();
-        let update_autocomplete_preview = update_autocomplete_preview.clone();
-
-        move || {
-            let buffer = text_view.buffer();
-            let cursor_offset = buffer.cursor_position();
-            let (buf_start, _) = buffer.bounds();
-            let cursor_iter = buffer.iter_at_offset(cursor_offset);
-            let text_before_cursor = buffer.text(&buf_start, &cursor_iter, true).to_string();
-
-            // Solo miramos la línea actual
-            let line_start_byte = text_before_cursor.rfind('\n').map(|i| i + 1).unwrap_or(0);
-            let line_before_cursor = &text_before_cursor[line_start_byte..];
-
-            let context = line_before_cursor.rfind("[[").and_then(|idx_byte| {
-                let after = &line_before_cursor[idx_byte + 2..];
-                if after.contains("]]") {
-                    None
-                } else {
-                    Some((idx_byte, after.to_string()))
-                }
-            });
-
-            let (bracket_idx_byte, query) = match context {
-                Some(c) => c,
-                None => {
-                    close_autocomplete();
-                    return;
-                }
-            };
-
-            // Convertir el offset en bytes (dentro de text_before_cursor) a offset en caracteres
-            let absolute_byte_offset = line_start_byte + bracket_idx_byte + 2;
-            let start_char_offset =
-                text_before_cursor[..absolute_byte_offset].chars().count() as i32;
-
-            // Calcular matches difusos contra la primera línea del contenido de cada nota
-            // (el título ahora es solo un timestamp, no sirve para buscar ni mostrar)
-            let mut matches: Vec<(String, String, String, String, i32)> = {
-                let st = state.borrow();
-                st.storage
-                    .notes
-                    .iter()
-                    .filter_map(|note| {
-                        let display_title = note
-                            .content
-                            .lines()
-                            .map(|l| l.trim())
-                            .find(|l| !l.is_empty())
-                            .unwrap_or("(nota vacía)")
-                            .to_string();
-
-                        fuzzy_score(&query, &display_title).map(|score| {
-                            let tags = if note.tags.is_empty() {
-                                String::new()
-                            } else {
-                                format!(
-                                    "[{}]",
-                                    note.tags
-                                        .iter()
-                                        .map(|t| t.as_str())
-                                        .collect::<Vec<_>>()
-                                        .join(" ")
-                                )
-                            };
-                            (note.id.clone(), note.title.clone(), display_title, tags, score)
-                        })
-                    })
-                    .collect()
-            };
-
-            if matches.is_empty() {
-                while let Some(child) = autocomplete_list.first_child() {
-                    autocomplete_list.remove(&child);
-                }
-                let empty_row = ListBoxRow::new();
-                empty_row.set_selectable(false);
-                empty_row.set_activatable(false);
-                let empty_label = Label::new(Some("Sin coincidencias"));
-                empty_label.add_css_class("dim-label");
-                empty_label.set_margin_start(10);
-                empty_label.set_margin_end(10);
-                empty_label.set_margin_top(6);
-                empty_label.set_margin_bottom(6);
-                empty_row.set_child(Some(&empty_label));
-                autocomplete_list.append(&empty_row);
-
-                *autocomplete_matches.borrow_mut() = Vec::new();
-                *autocomplete_state.borrow_mut() = AutocompleteState {
-                    active: true,
-                    start_offset: start_char_offset,
-                    selected: 0,
-                };
-
-                let anchor_iter = buffer.iter_at_offset(start_char_offset);
-                let rect = text_view.iter_location(&anchor_iter);
-                let (wx, wy) = text_view
-                    .buffer_to_window_coords(TextWindowType::Widget, rect.x(), rect.y());
-                let (ox, oy) = text_view
-                    .translate_coordinates(&editor_overlay, wx as f64, (wy + rect.height()) as f64)
-                    .unwrap_or((wx as f64, (wy + rect.height()) as f64));
-                autocomplete_body.set_margin_start(ox as i32);
-                autocomplete_body.set_margin_top(oy as i32);
-                autocomplete_body.set_visible(true);
-                return;
-            }
-
-            matches.sort_by(|a, b| a.4.cmp(&b.4).then_with(|| a.2.cmp(&b.2)));
-            matches.truncate(8);
-
-            // Poblar la lista visual
-            while let Some(child) = autocomplete_list.first_child() {
-                autocomplete_list.remove(&child);
-            }
-
-            for (_id, _title, display_title, tags, _score) in &matches {
-                let row = ListBoxRow::new();
-                let row_box = GtkBox::new(Orientation::Horizontal, 8);
-                row_box.set_margin_start(10);
-                row_box.set_margin_end(10);
-                row_box.set_margin_top(4);
-                row_box.set_margin_bottom(4);
-
-                let title_label = Label::new(Some(&format!("# {}", display_title)));
-                title_label.set_halign(Align::Start);
-                title_label.set_hexpand(true);
-
-                let tags_label = Label::new(Some(tags));
-                tags_label.set_halign(Align::End);
-                tags_label.add_css_class("dim-label");
-                tags_label.add_css_class("caption");
-
-                row_box.append(&title_label);
-                row_box.append(&tags_label);
-                row.set_child(Some(&row_box));
-                autocomplete_list.append(&row);
-            }
-
-            *autocomplete_matches.borrow_mut() = matches
-                .into_iter()
-                .map(|(id, title, _display, tags, _)| (id, title, tags))
-                .collect();
-
-            select_autocomplete_row(0);
-            update_autocomplete_preview(0);
-            *autocomplete_state.borrow_mut() = AutocompleteState {
-                active: true,
-                start_offset: start_char_offset,
-                selected: 0,
-            };
-
-            // Posicionar el panel justo debajo de donde se escribió "[["
-            let anchor_iter = buffer.iter_at_offset(start_char_offset);
-            let rect = text_view.iter_location(&anchor_iter);
-            let (wx, wy) =
-                text_view.buffer_to_window_coords(TextWindowType::Widget, rect.x(), rect.y());
-            let (ox, oy) = text_view
-                .translate_coordinates(&editor_overlay, wx as f64, (wy + rect.height()) as f64)
-                .unwrap_or((wx as f64, (wy + rect.height()) as f64));
-            autocomplete_body.set_margin_start(ox as i32);
-            autocomplete_body.set_margin_top(oy as i32);
-            autocomplete_body.set_visible(true);
-        }
-    };
-
-    // Inserta el título seleccionado en el buffer, reemplazando el "[[query" pendiente
-    let insert_autocomplete_selection = {
-        let text_view = text_view.clone();
-        let autocomplete_state = Rc::clone(&autocomplete_state);
-        let autocomplete_matches = Rc::clone(&autocomplete_matches);
-        let close_autocomplete = close_autocomplete.clone();
-
-        move |idx: usize| {
-            let title = {
-                let matches = autocomplete_matches.borrow();
-                matches.get(idx).map(|(_, t, _)| t.clone())
-            };
-
-            let title = match title {
-                Some(t) => t,
-                None => return,
-            };
-
-            let ac_state = *autocomplete_state.borrow();
-            let buffer = text_view.buffer();
-            let cursor_offset = buffer.cursor_position();
-
-            let mut start_iter = buffer.iter_at_offset(ac_state.start_offset);
-            let mut end_iter = buffer.iter_at_offset(cursor_offset);
-            buffer.delete(&mut start_iter, &mut end_iter);
-            buffer.insert(&mut start_iter, &format!("{}]]", title));
-            buffer.place_cursor(&start_iter);
-
-            close_autocomplete();
-            text_view.grab_focus();
-        }
-    };
-
-    // Flushes any pending debounced save immediately (used when switching notes or closing)
-    let flush_pending_save = {
-        let state = Rc::clone(&state);
-        let text_view = text_view.clone();
-
-        move || {
-            let mut st = state.borrow_mut();
-
-            if let Some(source_id) = st.save_timeout_source.take() {
-                source_id.remove();
-
-                if let Some(current_id) = st.current_note_id.clone() {
-                    let buffer = text_view.buffer();
-                    let (start, end) = buffer.bounds();
-                    let text = buffer.text(&start, &end, true).to_string();
-                    st.storage.save_note(&current_id, &text);
-                }
-            }
-        }
-    };
-
     // Helper functions for UI refresh
     let populate_list = {
         let state = Rc::clone(&state);
@@ -637,17 +190,67 @@ pub fn build_ui(app: &Application) {
         }
     };
 
+    // Al hacer Ctrl+Enter sobre un wiki-link, pone su texto en la barra de búsqueda y filtra
+    let search_wiki_target = {
+        let state = Rc::clone(&state);
+        let populate_list = populate_list.clone();
+        let search_entry = search_entry.clone();
+
+        move |target: &str| {
+            let target_clean = target.trim();
+            if target_clean.is_empty() {
+                return;
+            }
+
+            search_entry.set_text(target_clean);
+            search_entry.grab_focus();
+            search_entry.select_region(0, -1);
+
+            {
+                let mut st = state.borrow_mut();
+                st.filtered_indices = search_notes(&st.storage.notes, target_clean);
+            }
+            populate_list();
+        }
+    };
+
+    // Sistema de wiki-links: resaltado + autocompletado difuso con panel flotante
+    let wiki = WikiAutocomplete::setup(Rc::clone(&state), text_view.clone(), editor_overlay, {
+        let search_wiki_target = search_wiki_target.clone();
+        move |target: &str| search_wiki_target(target)
+    });
+
+    // Flushes any pending debounced save immediately (used when switching notes or closing)
+    let flush_pending_save = {
+        let state = Rc::clone(&state);
+        let text_view = text_view.clone();
+
+        move || {
+            let mut st = state.borrow_mut();
+
+            if let Some(source_id) = st.save_timeout_source.take() {
+                source_id.remove();
+
+                if let Some(current_id) = st.current_note_id.clone() {
+                    let buffer = text_view.buffer();
+                    let (start, end) = buffer.bounds();
+                    let text = buffer.text(&start, &end, true).to_string();
+                    st.storage.save_note(&current_id, &text);
+                }
+            }
+        }
+    };
+
     let select_note_by_id = {
         let state = Rc::clone(&state);
         let text_view = text_view.clone();
         let list_box = list_box.clone();
         let info_label = info_label.clone();
         let flush_pending_save = flush_pending_save.clone();
-        let refresh_wiki_links = refresh_wiki_links.clone();
-        let close_autocomplete = close_autocomplete.clone();
+        let wiki = wiki.clone();
 
         move |target_id: &str| {
-            close_autocomplete();
+            wiki.close();
             // Guardar cualquier cambio pendiente de la nota anterior antes de cambiar
             flush_pending_save();
 
@@ -686,7 +289,7 @@ pub fn build_ui(app: &Application) {
                 st.is_updating_ui = false;
             }
 
-            refresh_wiki_links();
+            wiki.refresh();
 
             // Mover el foco al editor con el cursor al final del texto
             let buffer = text_view.buffer();
@@ -708,30 +311,6 @@ pub fn build_ui(app: &Application) {
                 st.filtered_indices = search_notes(&st.storage.notes, &query);
             }
 
-            populate_list();
-        }
-    };
-
-    // Al hacer Ctrl+Enter sobre un wiki-link, pone su texto en la barra de búsqueda y filtra
-    let search_wiki_target = {
-        let state = Rc::clone(&state);
-        let populate_list = populate_list.clone();
-        let search_entry = search_entry.clone();
-
-        move |target: &str| {
-            let target_clean = target.trim();
-            if target_clean.is_empty() {
-                return;
-            }
-
-            search_entry.set_text(target_clean);
-            search_entry.grab_focus();
-            search_entry.select_region(0, -1);
-
-            {
-                let mut st = state.borrow_mut();
-                st.filtered_indices = search_notes(&st.storage.notes, target_clean);
-            }
             populate_list();
         }
     };
@@ -816,8 +395,7 @@ pub fn build_ui(app: &Application) {
     text_view.buffer().connect_changed({
         let state = Rc::clone(&state);
         let info_label = info_label.clone();
-        let refresh_wiki_links = refresh_wiki_links.clone();
-        let update_autocomplete = update_autocomplete.clone();
+        let wiki = wiki.clone();
 
         move |buffer| {
             let mut st = state.borrow_mut();
@@ -862,8 +440,8 @@ pub fn build_ui(app: &Application) {
             }
 
             drop(st);
-            refresh_wiki_links();
-            update_autocomplete();
+            wiki.refresh();
+            wiki.update();
         }
     });
 
@@ -941,95 +519,7 @@ pub fn build_ui(app: &Application) {
         }
     };
 
-    // Controlador de teclado del editor: maneja el popover de autocompletado
-    // (↑/↓/Enter/Tab/Esc) y, si no está activo, Ctrl+Enter para navegar wiki-links existentes.
-    let key_controller_editor = EventControllerKey::new();
-    key_controller_editor.connect_key_pressed({
-        let state = Rc::clone(&state);
-        let text_view = text_view.clone();
-        let search_wiki_target = search_wiki_target.clone();
-        let autocomplete_state = Rc::clone(&autocomplete_state);
-        let autocomplete_matches = Rc::clone(&autocomplete_matches);
-        let select_autocomplete_row = select_autocomplete_row.clone();
-        let update_autocomplete_preview = update_autocomplete_preview.clone();
-        let insert_autocomplete_selection = insert_autocomplete_selection.clone();
-        let close_autocomplete = close_autocomplete.clone();
-
-        move |_, key, _, modifier| {
-            let is_ctrl = modifier.contains(gdk::ModifierType::CONTROL_MASK);
-
-            let ac_active = autocomplete_state.borrow().active;
-            if ac_active {
-                let count = autocomplete_matches.borrow().len();
-                match key {
-                    Key::Down => {
-                        let mut ac = autocomplete_state.borrow_mut();
-                        if count > 0 {
-                            ac.selected = (ac.selected + 1).min(count - 1);
-                        }
-                        let sel = ac.selected;
-                        drop(ac);
-                        select_autocomplete_row(sel);
-                        update_autocomplete_preview(sel);
-                        return glib::Propagation::Stop;
-                    }
-                    Key::Up => {
-                        let mut ac = autocomplete_state.borrow_mut();
-                        ac.selected = ac.selected.saturating_sub(1);
-                        let sel = ac.selected;
-                        drop(ac);
-                        select_autocomplete_row(sel);
-                        update_autocomplete_preview(sel);
-                        return glib::Propagation::Stop;
-                    }
-                    Key::Return | Key::KP_Enter | Key::Tab => {
-                        let sel = autocomplete_state.borrow().selected;
-                        insert_autocomplete_selection(sel);
-                        return glib::Propagation::Stop;
-                    }
-                    Key::Escape => {
-                        close_autocomplete();
-                        return glib::Propagation::Stop;
-                    }
-                    _ => {
-                        // Dejar pasar la tecla para que se siga escribiendo la query;
-                        // connect_changed va a recalcular los matches.
-                        return glib::Propagation::Proceed;
-                    }
-                }
-            }
-
-            if is_ctrl && (key == Key::Return || key == Key::KP_Enter) {
-                let buffer = text_view.buffer();
-                let cursor_offset = buffer.cursor_position();
-
-                let target = {
-                    let st = state.borrow();
-                    st.current_wiki_links.iter().find_map(|link| {
-                        let (s, e) = buffer.bounds();
-                        let text = buffer.text(&s, &e, true).to_string();
-                        let char_start = text[..link.start].chars().count() as i32;
-                        let char_end = text[..link.end].chars().count() as i32;
-                        if cursor_offset >= char_start && cursor_offset <= char_end {
-                            Some(link.target.clone())
-                        } else {
-                            None
-                        }
-                    })
-                };
-
-                if let Some(target) = target {
-                    search_wiki_target(&target);
-                    return glib::Propagation::Stop;
-                }
-            }
-
-            glib::Propagation::Proceed
-        }
-    });
-    text_view.add_controller(key_controller_editor);
-
-    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D)
+    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+J, Ctrl+K)
     let key_controller = EventControllerKey::new();
     key_controller.connect_key_pressed({
         let search_entry = search_entry.clone();

@@ -1,7 +1,9 @@
+mod app_state;
 mod config;
 mod note;
 mod search;
 mod storage;
+mod wiki_autocomplete;
 mod wiki_link;
 mod window;
 
