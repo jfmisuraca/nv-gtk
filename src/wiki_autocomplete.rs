@@ -10,15 +10,16 @@ use gtk4::{
     TextWindowType,
 };
 
-use crate::app_state::AppState;
+use crate::app_state::{timestamp_title, AppState};
 use crate::wiki_link::extract_wiki_links;
 
 /// Estado del panel de autocompletado de wiki-links
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Default)]
 struct AutocompleteState {
     active: bool,
     start_offset: i32, // offset (en caracteres) justo después de "[["
     selected: usize,
+    query: String, // lo que se escribió después de "[[", para poder crear una nota con eso
 }
 
 /// Coincidencia difusa tipo "subsequence": todos los caracteres de `query` deben
@@ -352,6 +353,7 @@ impl WikiAutocomplete {
                         active: true,
                         start_offset: start_char_offset,
                         selected: 0,
+                        query: query.clone(),
                     };
 
                     let anchor_iter = buffer.iter_at_offset(start_char_offset);
@@ -411,6 +413,7 @@ impl WikiAutocomplete {
                     active: true,
                     start_offset: start_char_offset,
                     selected: 0,
+                    query: query.clone(),
                 };
 
                 // Posicionar el panel justo debajo de donde se escribió "[["
@@ -447,7 +450,7 @@ impl WikiAutocomplete {
                     None => return,
                 };
 
-                let ac_state = *autocomplete_state.borrow();
+                let ac_state = autocomplete_state.borrow().clone();
                 let buffer = text_view.buffer();
                 let cursor_offset = buffer.cursor_position();
 
@@ -455,6 +458,43 @@ impl WikiAutocomplete {
                 let mut end_iter = buffer.iter_at_offset(cursor_offset);
                 buffer.delete(&mut start_iter, &mut end_iter);
                 buffer.insert(&mut start_iter, &format!("{}]]", title));
+                buffer.place_cursor(&start_iter);
+
+                close_autocomplete();
+                text_view.grab_focus();
+            }
+        };
+
+        // Crea una nota nueva usando la query actual como primera línea de contenido,
+        // e inserta el link a esa nota nueva en el buffer (Ctrl+Shift+Enter)
+        let create_note_from_query = {
+            let state = Rc::clone(&state);
+            let text_view = text_view.clone();
+            let autocomplete_state = Rc::clone(&autocomplete_state);
+            let close_autocomplete = Rc::clone(&close_autocomplete);
+
+            move || {
+                let ac_state = autocomplete_state.borrow().clone();
+                let query_clean = ac_state.query.trim();
+                if query_clean.is_empty() {
+                    return;
+                }
+
+                let new_title = {
+                    let mut st = state.borrow_mut();
+                    let new_note = st.storage.create_note(&timestamp_title());
+                    let new_id = new_note.id.clone();
+                    st.storage.save_note(&new_id, query_clean);
+                    new_id
+                };
+
+                let buffer = text_view.buffer();
+                let cursor_offset = buffer.cursor_position();
+
+                let mut start_iter = buffer.iter_at_offset(ac_state.start_offset);
+                let mut end_iter = buffer.iter_at_offset(cursor_offset);
+                buffer.delete(&mut start_iter, &mut end_iter);
+                buffer.insert(&mut start_iter, &format!("{}]]", new_title));
                 buffer.place_cursor(&start_iter);
 
                 close_autocomplete();
@@ -474,10 +514,12 @@ impl WikiAutocomplete {
             let select_autocomplete_row = select_autocomplete_row.clone();
             let update_autocomplete_preview = update_autocomplete_preview.clone();
             let insert_autocomplete_selection = insert_autocomplete_selection.clone();
+            let create_note_from_query = create_note_from_query.clone();
             let close_autocomplete = Rc::clone(&close_autocomplete);
 
             move |_, key, _, modifier| {
                 let is_ctrl = modifier.contains(gdk::ModifierType::CONTROL_MASK);
+                let is_shift = modifier.contains(gdk::ModifierType::SHIFT_MASK);
 
                 let ac_active = autocomplete_state.borrow().active;
                 if ac_active {
@@ -501,6 +543,10 @@ impl WikiAutocomplete {
                             drop(ac);
                             select_autocomplete_row(sel);
                             update_autocomplete_preview(sel);
+                            return glib::Propagation::Stop;
+                        }
+                        Key::Return | Key::KP_Enter if is_ctrl && is_shift => {
+                            create_note_from_query();
                             return glib::Propagation::Stop;
                         }
                         Key::Return | Key::KP_Enter | Key::Tab => {
