@@ -472,16 +472,33 @@ pub fn build_ui(app: &Application) {
         let state = Rc::clone(&state);
         let search_entry = search_entry.clone();
         let update_search = update_search.clone();
+        let text_view = text_view.clone();
+        let info_label = info_label.clone();
 
         move || {
             let mut st = state.borrow_mut();
             if let Some(id) = st.current_note_id.clone() {
                 st.storage.delete_note(&id);
                 st.current_note_id = None;
+                st.current_wiki_links = Vec::new();
                 drop(st);
 
                 search_entry.set_text("");
                 update_search();
+
+                // Limpiar el editor: no dejar el contenido de la nota borrada en
+                // pantalla. Sin esto, el buffer muestra un "fantasma" y, como ya
+                // no hay nota seleccionada, lo que el usuario escriba se pierde.
+                {
+                    let buffer = text_view.buffer();
+                    let mut st = state.borrow_mut();
+                st.is_updating_ui = true;
+                buffer.set_text("");
+                    drop(st);
+                }
+
+                info_label.set_text("Nota borrada");
+                text_view.grab_focus();
             }
         }
     };
