@@ -842,10 +842,10 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
-    if ((lib.uniffi_nv_core_checksum_method_nvstorage_create_note() and 0xFFFF) != 41707) {
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_create_note() and 0xFFFF) != 45275) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_nv_core_checksum_method_nvstorage_delete_note() and 0xFFFF) != 12882) {
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_delete_note() and 0xFFFF) != 25332) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_nv_core_checksum_method_nvstorage_get_note() and 0xFFFF) != 2686) {
@@ -854,10 +854,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_nv_core_checksum_method_nvstorage_list_notes() and 0xFFFF) != 45842) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_nv_core_checksum_method_nvstorage_save_note() and 0xFFFF) != 63380) {
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_save_note() and 0xFFFF) != 27068) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_nv_core_checksum_method_nvstorage_search_notes() and 0xFFFF) != 3369) {
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_search_notes() and 0xFFFF) != 37250) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_nv_core_checksum_constructor_nvstorage_open() and 0xFFFF) != 8224) {
@@ -1228,11 +1228,13 @@ public interface NvStorageInterface {
     
     /**
      * Create a note (collision-proof like the desktop: never overwrites).
+     * `Err(NvError::Io)` when the note file cannot be persisted.
      */
     fun `createNote`(`title`: kotlin.String): NoteSnapshot
     
     /**
-     * Delete by id; `false` when the id is unknown (mirrors desktop).
+     * Delete by id; `Ok(false)` when the id is unknown (mirrors desktop).
+     * `Err(NvError::Io)` when the file cannot be removed.
      */
     fun `deleteNote`(`id`: kotlin.String): kotlin.Boolean
     
@@ -1245,11 +1247,14 @@ public interface NvStorageInterface {
     
     /**
      * Overwrite content, refresh mtime/tags, re-sort; returns the updated note.
+     * `NotFound` for unknown ids, `Io` when the file cannot be persisted.
      */
     fun `saveNote`(`id`: kotlin.String, `content`: kotlin.String): NoteSnapshot
     
     /**
      * Ranked search via `search_notes`; snapshots follow score order.
+     * The candidates are resolved without holding the storage lock, so a
+     * slow fuzzy pass over many notes does not block concurrent saves.
      */
     fun `searchNotes`(`query`: kotlin.String): List<NoteSnapshot>
     
@@ -1365,10 +1370,12 @@ open class NvStorage: Disposable, AutoCloseable, NvStorageInterface
     
     /**
      * Create a note (collision-proof like the desktop: never overwrites).
-     */override fun `createNote`(`title`: kotlin.String): NoteSnapshot {
+     * `Err(NvError::Io)` when the note file cannot be persisted.
+     */
+    @Throws(NvException::class)override fun `createNote`(`title`: kotlin.String): NoteSnapshot {
             return FfiConverterTypeNoteSnapshot.lift(
     callWithHandle {
-    uniffiRustCall() { _status ->
+    uniffiRustCallWithError(NvException) { _status ->
     UniffiLib.uniffi_nv_core_fn_method_nvstorage_create_note(
         it,
         
@@ -1381,11 +1388,13 @@ open class NvStorage: Disposable, AutoCloseable, NvStorageInterface
 
     
     /**
-     * Delete by id; `false` when the id is unknown (mirrors desktop).
-     */override fun `deleteNote`(`id`: kotlin.String): kotlin.Boolean {
+     * Delete by id; `Ok(false)` when the id is unknown (mirrors desktop).
+     * `Err(NvError::Io)` when the file cannot be removed.
+     */
+    @Throws(NvException::class)override fun `deleteNote`(`id`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
     callWithHandle {
-    uniffiRustCall() { _status ->
+    uniffiRustCallWithError(NvException) { _status ->
     UniffiLib.uniffi_nv_core_fn_method_nvstorage_delete_note(
         it,
         
@@ -1430,6 +1439,7 @@ open class NvStorage: Disposable, AutoCloseable, NvStorageInterface
     
     /**
      * Overwrite content, refresh mtime/tags, re-sort; returns the updated note.
+     * `NotFound` for unknown ids, `Io` when the file cannot be persisted.
      */
     @Throws(NvException::class)override fun `saveNote`(`id`: kotlin.String, `content`: kotlin.String): NoteSnapshot {
             return FfiConverterTypeNoteSnapshot.lift(
@@ -1449,6 +1459,8 @@ open class NvStorage: Disposable, AutoCloseable, NvStorageInterface
     
     /**
      * Ranked search via `search_notes`; snapshots follow score order.
+     * The candidates are resolved without holding the storage lock, so a
+     * slow fuzzy pass over many notes does not block concurrent saves.
      */override fun `searchNotes`(`query`: kotlin.String): List<NoteSnapshot> {
             return FfiConverterSequenceTypeNoteSnapshot.lift(
     callWithHandle {

@@ -103,7 +103,17 @@ it toward the top.
   appending `-<counter>` while that also exists. The original file is never
   overwritten.
 - Save (`StorageManager::save_note`): writes the file **only** when content
-  actually changed; then re-sorts the list (rule 7).
+  actually changed; then re-sorts the list (rule 7). Returns `Ok(true)` on
+  success (including unchanged content), `Ok(false)` for unknown ids, and
+  `Err` when the file cannot be written — in that case the in-memory content
+  is still updated (the caller's edits are preserved) but persistence failed.
+- Delete (`StorageManager::delete_note`): `Ok(true)` removes the file and the
+  entry; `Ok(false)` for unknown ids; `Err` when removal fails — the entry is
+  then kept in memory, matching what is still on disk.
+- Creation (`StorageManager::create_note`): `Err` when the note file cannot be
+  written, inserting nothing — no in-memory ghosts for unpersisted notes.
+- FFI (`nv-core/src/ffi.rs`): persistence failures surface as `NvError::Io`,
+  unknown ids as `NvError::NotFound` (`get`/`save`) or `Ok(false)` (`delete`).
 - `Note::save`: `fs::write` overwrites the file, refreshes `modified_at` to
   now, and re-derives tags from the new content (rule 5). The note keeps its
   `id`/`filepath`.
