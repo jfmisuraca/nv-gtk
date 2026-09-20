@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk4::gdk::{self, Key};
@@ -114,6 +114,49 @@ pub fn build_ui(app: &Application) {
 
     paned.set_end_child(Some(&editor_box));
     window.set_content(Some(&paned));
+
+    // ── Responsive layout ─────────────────────────────────────────────
+    // Estado compartido del modo vertical (ventana más alta que ancha).
+    let is_portrait = Rc::new(Cell::new(false));
+
+    // Aplica el layout según la orientación real de la ventana. En vertical el
+    // buscador queda arriba de todo y la lista de notas queda oculta; en
+    // horizontal se restaura el split clásico de dos paneles.
+    let apply_layout = {
+        let paned = paned.clone();
+        let list_scroll = list_scroll.clone();
+        let is_portrait = Rc::clone(&is_portrait);
+
+        move |portrait: bool| {
+            if is_portrait.get() == portrait {
+                return;
+            }
+            is_portrait.set(portrait);
+
+            if portrait {
+                paned.set_orientation(Orientation::Vertical);
+                paned.set_position(0);
+                list_scroll.set_visible(false);
+            } else {
+                paned.set_orientation(Orientation::Horizontal);
+                paned.set_position(300);
+                list_scroll.set_visible(true);
+            }
+        }
+    };
+
+    // Detecta la orientación en cada re-alocación: height > width = vertical.
+    // Detecta la orientación leyendo el tamaño real (allocation) de la ventana en
+// cada frame: height > width = vertical. Se usa el tick callback porque el
+// signal "size-allocate" no está expuesto como connect_* en gtk4-rs 0.9.
+window.add_tick_callback({
+    let apply_layout = apply_layout.clone();
+    move |win, _frame_clock| {
+        let portrait = win.height() > win.width();
+        apply_layout(portrait);
+        glib::ControlFlow::Continue
+    }
+});
 
     // Helper functions for UI refresh
     // Reconstruye la lista desde el estado REAL de storage (NOTA: usa `filtered_indices` ya
