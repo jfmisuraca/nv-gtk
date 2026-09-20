@@ -116,6 +116,10 @@ pub fn build_ui(app: &Application) {
     window.set_content(Some(&paned));
 
     // Helper functions for UI refresh
+    // Reconstruye la lista desde el estado REAL de storage (NOTA: usa `filtered_indices` ya
+    // derivadas correctamente). Se llama tras un save para que el sidebar refleje el nuevo
+    // orden del re-sort — de lo contrario navegar por índice (Ctrl+J/K) tras guardar puede
+    // abrir la nota equivocada.
     let populate_list = {
         let state = Rc::clone(&state);
         let list_box = list_box.clone();
@@ -190,6 +194,81 @@ pub fn build_ui(app: &Application) {
         }
     };
 
+    // Re-selecciona la fila que corresponde a un id en la lista, SIN tocar el editor.
+    // Se llama tras reconciliar (p. ej. un re-sort por modified_at tras save_note) para
+    // restaurar la selección visual por índice sin disparar el echo del buffer.
+    let select_row_by_id = {
+        let state = Rc::clone(&state);
+        let list_box = list_box.clone();
+
+        move |target_id: &str| {
+            let st = state.borrow();
+            if let Some(pos) = st.filtered_indices.iter().position(|id| id == target_id) {
+                if let Some(row) = list_box.row_at_index(pos as i32) {
+                    drop(st);
+                    list_box.select_row(Some(&row));
+                }
+            }
+        }
+    };
+
+    // Re-concilia la lista tras un guardado (debounced o flush). El re-sort de notas por
+    // modified_at (storage.save_note) no toca `filtered_indices`, así que la barra lateral
+    // queda con orden viejo y la navegación por índice (Ctrl+J/K) puede abrir la nota
+    // equivocada. Aquí re-derivamos el filtro respetando la query activa y re-poblamos,
+    // restaurando la selección SIN tocar el editor (nada de echo del buffer).
+
+    let reconcile_after_edit = {
+        let state = Rc::clone(&state);
+        let search_entry = search_entry.clone();
+        let populate_list = populate_list.clone();
+        let select_row_by_id = select_row_by_id.clone();
+
+        move || {
+            let query = search_entry.text().to_string();
+            {
+                let mut st = state.borrow_mut();
+                st.filtered_indices = search_notes(&st.storage.notes, &query);
+            }
+
+            populate_list();
+
+            let current_id = {
+                let st = state.borrow();
+                st.current_note_id.clone()
+            };
+            if let Some(id) = current_id {
+                select_row_by_id(&id);
+            }
+        }
+    };
+
+    // Reconstruye la lista desde el estado real de storage (NOTA: usa `notes` ya ordenadas
+    // por el re-sort de `save_note`). Se llama después de guardar para que el sidebar y
+    // `filtered_indices` reflejen el nuevo orden — de lo contrario la selección por índice
+    // (Ctrl+J/K y el click) navega a la nota equivocada tras un re-sort.
+    let reconcile_after_save = {
+        let state = Rc::clone(&state);
+        let search_entry = search_entry.clone();
+        let populate_list = populate_list.clone();
+        let select_row_by_id = select_row_by_id.clone();
+
+        move || {
+            let query = search_entry.text().to_string();
+            {
+                let mut st = state.borrow_mut();
+                st.filtered_indices = search_notes(&st.storage.notes, &query);
+            }
+
+            populate_list();
+
+            let current_id = state.borrow().current_note_id.clone();
+            if let Some(id) = current_id {
+                select_row_by_id(&id);
+            }
+        }
+    };
+
     // Al hacer Ctrl+Enter sobre un wiki-link, pone su texto en la barra de búsqueda y filtra
     let search_wiki_target = {
         let state = Rc::clone(&state);
@@ -235,7 +314,12 @@ pub fn build_ui(app: &Application) {
                     let buffer = text_view.buffer();
                     let (start, end) = buffer.bounds();
                     let text = buffer.text(&start, &end, true).to_string();
+                    drop(buffer);
+
                     st.storage.save_note(&current_id, &text);
+                    drop(st);
+                    reconcile_after_edit();
+                    reconcile_after_save();
                 }
             }
         }
@@ -472,16 +556,33 @@ pub fn build_ui(app: &Application) {
         let state = Rc::clone(&state);
         let search_entry = search_entry.clone();
         let update_search = update_search.clone();
+        let text_view = text_view.clone();
+        let info_label = info_label.clone();
 
         move || {
             let mut st = state.borrow_mut();
             if let Some(id) = st.current_note_id.clone() {
                 st.storage.delete_note(&id);
                 st.current_note_id = None;
+                st.current_wiki_links = Vec::new();
                 drop(st);
 
                 search_entry.set_text("");
                 update_search();
+
+                // Limpiar el editor: no dejar el contenido de la nota borrada en
+                // pantalla. Sin esto, el buffer muestra un "fantasma" y, como ya
+                // no hay nota seleccionada, lo que el usuario escriba se pierde.
+                {
+                    let buffer = text_view.buffer();
+                    let mut st = state.borrow_mut();
+                st.is_updating_ui = true;
+                buffer.set_text("");
+                    drop(st);
+                }
+
+                info_label.set_text("Nota borrada");
+                text_view.grab_focus();
             }
         }
     };

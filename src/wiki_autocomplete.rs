@@ -5,9 +5,8 @@ use gtk4::gdk::{self, Key};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, CssProvider, EventControllerKey, Label, ListBox, ListBoxRow,
-    Orientation, Overlay, ScrolledWindow, SelectionMode, Separator, TextTag, TextView,
-    TextWindowType,
+    Align, Box as GtkBox, CssProvider, EventControllerKey, Label, ListBox, ListBoxRow, Orientation,
+    Overlay, ScrolledWindow, SelectionMode, Separator, TextTag, TextView, TextWindowType,
 };
 
 use crate::app_state::{timestamp_title, AppState};
@@ -198,13 +197,9 @@ impl WikiAutocomplete {
 
                 let preview_text = note_id.and_then(|id| {
                     let st = state.borrow();
-                    st.storage.get_note(&id).map(|note| {
-                        note.content
-                            .lines()
-                            .take(4)
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    })
+                    st.storage
+                        .get_note(&id)
+                        .map(|note| note.content.lines().take(4).collect::<Vec<_>>().join("\n"))
                 });
 
                 autocomplete_preview.set_text(preview_text.as_deref().unwrap_or(""));
@@ -326,7 +321,13 @@ impl WikiAutocomplete {
                                             .join(" ")
                                     )
                                 };
-                                (note.id.clone(), note.title.clone(), display_title, tags, score)
+                                (
+                                    note.id.clone(),
+                                    note.title.clone(),
+                                    display_title,
+                                    tags,
+                                    score,
+                                )
                             })
                         })
                         .collect()
@@ -358,9 +359,13 @@ impl WikiAutocomplete {
 
                     let anchor_iter = buffer.iter_at_offset(start_char_offset);
                     let rect = text_view.iter_location(&anchor_iter);
-                    let (wx, wy) = text_view
-                        .buffer_to_window_coords(TextWindowType::Widget, rect.x(), rect.y());
-                    let src_point = gtk4::graphene::Point::new(wx as f32, (wy + rect.height()) as f32);
+                    let (wx, wy) = text_view.buffer_to_window_coords(
+                        TextWindowType::Widget,
+                        rect.x(),
+                        rect.y(),
+                    );
+                    let src_point =
+                        gtk4::graphene::Point::new(wx as f32, (wy + rect.height()) as f32);
                     let (ox, oy) = text_view
                         .compute_point(&editor_overlay, &src_point)
                         .map(|p| (p.x() as f64, p.y() as f64))
@@ -404,7 +409,7 @@ impl WikiAutocomplete {
 
                 *autocomplete_matches.borrow_mut() = matches
                     .into_iter()
-                    .map(|(id, title, _display, tags, _)| (id, title, tags))
+                    .map(|(id, _title, display, tags, _)| (id, display, tags))
                     .collect();
 
                 select_autocomplete_row(0);
@@ -480,13 +485,12 @@ impl WikiAutocomplete {
                     return;
                 }
 
-                let new_title = {
+                {
                     let mut st = state.borrow_mut();
                     let new_note = st.storage.create_note(&timestamp_title());
                     let new_id = new_note.id.clone();
                     st.storage.save_note(&new_id, query_clean);
-                    new_id
-                };
+                }
 
                 let buffer = text_view.buffer();
                 let cursor_offset = buffer.cursor_position();
@@ -494,7 +498,9 @@ impl WikiAutocomplete {
                 let mut start_iter = buffer.iter_at_offset(ac_state.start_offset);
                 let mut end_iter = buffer.iter_at_offset(cursor_offset);
                 buffer.delete(&mut start_iter, &mut end_iter);
-                buffer.insert(&mut start_iter, &format!("{}]]", new_title));
+                // El texto del link es la query (título visible), no el timestamp
+                // interno: la nota muestra lo que el usuario escribió.
+                buffer.insert(&mut start_iter, &format!("{}]]", query_clean));
                 buffer.place_cursor(&start_iter);
 
                 close_autocomplete();
