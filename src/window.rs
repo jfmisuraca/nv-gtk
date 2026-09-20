@@ -463,7 +463,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
                     let text = buffer.text(&start, &end, true).to_string();
                     drop(buffer);
 
-                    st.storage.save_note(&current_id, &text);
+                    let _ = st.storage.save_note(&current_id, &text);
                     drop(st);
                     reconcile_after_edit();
                     reconcile_after_save();
@@ -599,11 +599,17 @@ pub fn build_ui(app: &Application) -> UiHandles {
                 if let Some(best_match_id) = st.filtered_indices.first().cloned() {
                     (true, best_match_id)
                 } else {
-                    let new_note = st.storage.create_note(&timestamp_title());
-                    let new_id = new_note.id.clone();
-                    st.storage.save_note(&new_id, query_clean);
-                    st.filtered_indices = st.storage.notes.iter().map(|n| n.id.clone()).collect();
-                    (true, new_id)
+                    match st.storage.create_note(&timestamp_title()) {
+                        Ok(new_note) => {
+                            let new_id = new_note.id.clone();
+                            let _ = st.storage.save_note(&new_id, query_clean);
+                            st.filtered_indices =
+                                st.storage.notes.iter().map(|n| n.id.clone()).collect();
+                            (true, new_id)
+                        }
+                        // Disk failure: no note to select, keep the query as-is.
+                        Err(_) => (false, String::new()),
+                    }
                 }
             };
 
@@ -699,7 +705,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
                         let text = buffer_for_timeout.text(&start, &end, true).to_string();
 
                         let mut st = state_for_timeout.borrow_mut();
-                        st.storage.save_note(&current_id, &text);
+                        let _ = st.storage.save_note(&current_id, &text);
                         st.save_timeout_source = None;
 
                         glib::ControlFlow::Break // ejecutar una sola vez
@@ -726,7 +732,9 @@ pub fn build_ui(app: &Application) -> UiHandles {
         move || {
             search_entry.set_text("");
             let mut st = state.borrow_mut();
-            let note = st.storage.create_note(&timestamp_title());
+            let Ok(note) = st.storage.create_note(&timestamp_title()) else {
+                return;
+            };
             let id = note.id.clone();
             st.filtered_indices = st.storage.notes.iter().map(|n| n.id.clone()).collect();
             drop(st);
@@ -748,7 +756,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
         move || {
             let mut st = state.borrow_mut();
             if let Some(id) = st.current_note_id.clone() {
-                st.storage.delete_note(&id);
+                let _ = st.storage.delete_note(&id);
                 st.current_note_id = None;
                 st.current_wiki_links = Vec::new();
                 drop(st);
