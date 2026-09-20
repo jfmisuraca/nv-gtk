@@ -124,10 +124,15 @@ impl NvStorage {
     }
 
     /// Ranked search via `search_notes`; snapshots follow score order.
+    /// The candidates are resolved without holding the storage lock, so a
+    /// slow fuzzy pass over many notes does not block concurrent saves.
     pub fn search_notes(&self, query: String) -> Vec<NoteSnapshot> {
+        let ids = {
+            let inner = self.lock();
+            search_notes(&inner.notes, &query)
+        };
         let inner = self.lock();
-        search_notes(&inner.notes, &query)
-            .iter()
+        ids.iter()
             .filter_map(|id| inner.get_note(id).map(snapshot_of))
             .collect()
     }
@@ -140,23 +145,32 @@ impl NvStorage {
     }
 
     /// Create a note (collision-proof like the desktop: never overwrites).
-    pub fn create_note(&self, title: String) -> NoteSnapshot {
-        snapshot_of(&self.lock().create_note(&title))
+    /// `Err(NvError::Io)` when the note file cannot be persisted.
+    pub fn create_note(&self, title: String) -> Result<NoteSnapshot, NvError> {
+        self.lock()
+            .create_note(&title)
+            .map(|note| snapshot_of(&note))
+            .map_err(NvError::from)
     }
 
     /// Overwrite content, refresh mtime/tags, re-sort; returns the updated note.
+    /// `NotFound` for unknown ids, `Io` when the file cannot be persisted.
     pub fn save_note(&self, id: String, content: String) -> Result<NoteSnapshot, NvError> {
         let mut inner = self.lock();
-        inner.save_note(&id, &content);
-        inner
-            .get_note(&id)
-            .map(snapshot_of)
-            .ok_or(NvError::NotFound(id))
+        match inner.save_note(&id, &content) {
+            Err(e) => Err(NvError::from(e)),
+            Ok(false) => Err(NvError::NotFound(id)),
+            Ok(true) => inner
+                .get_note(&id)
+                .map(snapshot_of)
+                .ok_or(NvError::NotFound(id)),
+        }
     }
 
-    /// Delete by id; `false` when the id is unknown (mirrors desktop).
-    pub fn delete_note(&self, id: String) -> bool {
-        self.lock().delete_note(&id)
+    /// Delete by id; `Ok(false)` when the id is unknown (mirrors desktop).
+    /// `Err(NvError::Io)` when the file cannot be removed.
+    pub fn delete_note(&self, id: String) -> Result<bool, NvError> {
+        self.lock().delete_note(&id).map_err(NvError::from)
     }
 }
 
@@ -222,7 +236,7 @@ mod tests {
         fs::write(dir.join("old.md"), "plain").unwrap();
         let storage = NvStorage::open(dir.to_string_lossy().into()).unwrap();
 
-        let created = storage.create_note("fresh".to_string());
+        let created = storage.create_note("fresh".to_string()).unwrap();
         assert_eq!(created.id, "fresh");
         assert_eq!(storage.list_notes().len(), 2);
 
@@ -235,8 +249,8 @@ mod tests {
         assert_eq!(saved.tags, vec!["alpha", "beta"]);
         assert_eq!(storage.list_notes()[0].id, "fresh");
 
-        assert!(storage.delete_note("fresh".to_string()));
-        assert!(!storage.delete_note("fresh".to_string()));
+        assert!(storage.delete_note("fresh".to_string()).unwrap());
+        assert!(!storage.delete_note("fresh".to_string()).unwrap());
         assert!(matches!(
             storage.get_note("fresh".to_string()),
             Err(NvError::NotFound(_))
@@ -259,6 +273,50 @@ mod tests {
         assert_eq!(hits[0].id, "shopping");
         assert_eq!(hits[0].content, "buy milk eggs");
         assert_eq!(storage.search_notes(String::new()).len(), 2);
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn create_handles_collisions_and_blank_titles() {
+        let dir = temp_dir("create-edges");
+        let storage = NvStorage::open(dir.to_string_lossy().into()).unwrap();
+
+        let first = storage.create_note("dupe".to_string()).unwrap();
+        let second = storage.create_note("dupe".to_string()).unwrap();
+        assert_eq!(first.id, "dupe");
+        assert_ne!(second.id, first.id);
+        assert_eq!(storage.list_notes().len(), 2);
+
+        let untitled = storage.create_note("   ".to_string()).unwrap();
+        assert_eq!(untitled.id, "Untitled");
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn open_rejects_non_directory_paths_with_io() {
+        let dir = temp_dir("open-edges");
+        let file = dir.join("not-a-dir.md");
+        fs::write(&file, "x").unwrap();
+        assert!(matches!(
+            NvStorage::open(file.to_string_lossy().into()),
+            Err(NvError::Io(_))
+        ));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn save_reports_io_failure() {
+        let dir = temp_dir("save-io");
+        fs::write(dir.join("victim.md"), "original").unwrap();
+        let storage = NvStorage::open(dir.to_string_lossy().into()).unwrap();
+        // Replace the note file with a directory so overwriting it fails.
+        fs::remove_file(dir.join("victim.md")).unwrap();
+        fs::create_dir(dir.join("victim.md")).unwrap();
+        assert!(matches!(
+            storage.save_note("victim".to_string(), "updated".to_string()),
+            Err(NvError::Io(_))
+        ));
+        fs::remove_dir(&dir.join("victim.md")).ok();
         fs::remove_dir_all(&dir).ok();
     }
 }

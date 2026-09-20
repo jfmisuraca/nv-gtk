@@ -488,9 +488,11 @@ impl WikiAutocomplete {
 
                 {
                     let mut st = state.borrow_mut();
-                    let new_note = st.storage.create_note(&timestamp_title());
+                    let Ok(new_note) = st.storage.create_note(&timestamp_title()) else {
+                        return;
+                    };
                     let new_id = new_note.id.clone();
-                    st.storage.save_note(&new_id, query_clean);
+                    let _ = st.storage.save_note(&new_id, query_clean);
                 }
 
                 let buffer = text_view.buffer();

@@ -46,7 +46,10 @@ impl StorageManager {
         self.notes.iter().find(|n| n.id == id)
     }
 
-    pub fn create_note(&mut self, title: &str) -> Note {
+    /// Creates the note file on disk and inserts it at the front.
+    /// Returns `Err` (and inserts nothing) when the file cannot be written,
+    /// so callers can tell persistence failure apart from success.
+    pub fn create_note(&mut self, title: &str) -> std::io::Result<Note> {
         let title_clean = title.trim();
         let display_title = if title_clean.is_empty() {
             "Untitled"
@@ -71,9 +74,9 @@ impl StorageManager {
         };
 
         let mut note = Note::new(&self.notes_dir, &unique_title, &self.default_extension);
-        note.save().ok();
+        note.save()?;
         self.notes.insert(0, note.clone());
-        note
+        Ok(note)
     }
 
     /// Devuelve `true` si ya existe una nota con ese nombre, en memoria
@@ -88,24 +91,37 @@ impl StorageManager {
                 .exists()
     }
 
-    pub fn delete_note(&mut self, id: &str) -> bool {
+    /// Removes the note file from disk and drops it from memory.
+    /// `Ok(false)` when the id is unknown. Returns `Err` (and keeps the note
+    /// in memory, matching what is still on disk) when removal fails.
+    pub fn delete_note(&mut self, id: &str) -> std::io::Result<bool> {
         if let Some(idx) = self.notes.iter().position(|n| n.id == id) {
-            let note = self.notes.remove(idx);
-            fs::remove_file(&note.filepath).ok();
-            true
+            let path = self.notes[idx].filepath.clone();
+            fs::remove_file(&path)?;
+            self.notes.remove(idx);
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 
-    pub fn save_note(&mut self, id: &str, new_content: &str) {
-        if let Some(note) = self.notes.iter_mut().find(|n| n.id == id) {
-            if note.content != new_content {
-                note.content = new_content.to_string();
-                note.save().ok();
+    /// Overwrites the note file when content changed, then re-sorts newest-first.
+    /// `Ok(false)` when the id is unknown. On write failure the in-memory
+    /// content is kept (caller's edits are preserved) and `Err` is returned.
+    pub fn save_note(&mut self, id: &str, new_content: &str) -> std::io::Result<bool> {
+        let outcome = match self.notes.iter().position(|n| n.id == id) {
+            Some(idx) => {
+                if self.notes[idx].content != new_content {
+                    self.notes[idx].content = new_content.to_string();
+                    self.notes[idx].save().map(|()| true)
+                } else {
+                    Ok(true)
+                }
             }
-        }
+            None => Ok(false),
+        };
         self.notes.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+        outcome
     }
 }
 
@@ -222,7 +238,7 @@ mod tests {
 
         // Saving the older note with new content overwrites its file,
         // re-derives tags, and moves it to the front.
-        storage.save_note("second", "updated #beta #alpha #beta");
+        assert!(storage.save_note("second", "updated #beta #alpha #beta").unwrap());
         assert_eq!(storage.notes[0].id, "second");
         assert_eq!(
             storage.notes[0].tags,
@@ -235,7 +251,9 @@ mod tests {
         assert_eq!(fs::read_to_string(&first_path).unwrap(), "plain #alpha");
 
         // Saving identical content keeps the note in place at the front.
-        storage.save_note("second", "updated #beta #alpha #beta");
+        assert!(storage
+            .save_note("second", "updated #beta #alpha #beta")
+            .unwrap());
         assert_eq!(storage.notes[0].id, "second");
 
         fs::remove_dir_all(&dir).ok();
@@ -252,9 +270,9 @@ mod tests {
         storage.reload();
 
         // Simula dos notas creadas en el mismo minuto: mismo título base.
-        let first = storage.create_note("20240919-1530");
-        let second = storage.create_note("20240919-1530");
-        let third = storage.create_note("20240919-1530");
+        let first = storage.create_note("20240919-1530").unwrap();
+        let second = storage.create_note("20240919-1530").unwrap();
+        let third = storage.create_note("20240919-1530").unwrap();
 
         assert_eq!(first.title, "20240919-1530");
         assert_ne!(
@@ -272,5 +290,49 @@ mod tests {
         assert!(third.filepath.exists());
 
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn unknown_ids_report_false_without_touching_disk() {
+        let dir = temp_notes_dir();
+        write_file(&dir, "only.md", "content");
+        let mut storage = test_storage(&dir);
+        storage.reload();
+        assert_eq!(storage.save_note("ghost", "x").unwrap(), false);
+        assert_eq!(storage.delete_note("ghost").unwrap(), false);
+        assert_eq!(storage.notes.len(), 1);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn io_failures_surface_instead_of_silent_ghosts() {
+        // Create: notes_dir points at a regular file, so no note file can be written.
+        let dir = temp_notes_dir();
+        let blocker = write_file(&dir, "blocker.md", "x");
+        let mut bad = test_storage(&blocker);
+        assert!(bad.create_note("fresh").is_err());
+        assert!(bad.notes.is_empty());
+
+        // Save/delete: note file replaced by a directory, so writing or
+        // removing it via file APIs fails deterministically.
+        let dir2 = temp_notes_dir();
+        write_file(&dir2, "victim.md", "original");
+        let mut storage = test_storage(&dir2);
+        storage.reload();
+        fs::remove_file(dir2.join("victim.md")).unwrap();
+        fs::create_dir(dir2.join("victim.md")).unwrap();
+
+        storage.save_note("victim", "updated").unwrap_err();
+        // In-memory content is kept (the caller's edits are preserved).
+        assert_eq!(storage.get_note("victim").unwrap().content, "updated");
+
+        storage.delete_note("victim").unwrap_err();
+        // The note stays listed, matching what is still on disk.
+        assert!(storage.get_note("victim").is_some());
+
+        fs::remove_dir(&dir2.join("victim.md")).ok();
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir2).ok();
     }
 }
