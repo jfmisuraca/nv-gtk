@@ -191,6 +191,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
     let apply_layout: Rc<dyn Fn(bool)> = Rc::new({
         let paned = paned.clone();
         let list_scroll = list_scroll.clone();
+        let left_box = left_box.clone();
         let is_portrait = Rc::clone(&is_portrait);
         let update_results_visibility = update_results_visibility.clone();
 
@@ -202,8 +203,12 @@ pub fn build_ui(app: &Application) -> UiHandles {
 
             if portrait {
                 paned.set_orientation(Orientation::Vertical);
-                paned.set_position(0);
                 list_scroll.set_visible(false);
+                // El pane superior contiene la barra de búsqueda: posicionar el
+                // divisor en su altura natural (con la lista oculta) para que la
+                // barra quede SIEMPRE visible arriba. set_position(0) la colapsaba.
+                let (_, natural) = left_box.preferred_size();
+                paned.set_position(natural.height().max(48) as i32);
             } else {
                 paned.set_orientation(Orientation::Horizontal);
                 paned.set_position(300);
@@ -974,6 +979,13 @@ mod tests {
         assert_eq!(handles.paned.orientation(), Orientation::Vertical);
         assert!(!handles.list_scroll.is_visible());
         assert!(handles.is_portrait.get());
+        // La barra de búsqueda vive en el pane superior: el divisor debe quedar
+        // en su altura natural (regresión: set_position(0) la colapsaba).
+        assert!(
+            handles.paned.position() >= 32,
+            "la barra de búsqueda debe quedar visible arriba (position={})",
+            handles.paned.position()
+        );
 
         // Una query activa dispara el flujo de búsqueda y muestra el overlay.
         // En el test headless no hay foco X ni se puede sintetizar typing real
