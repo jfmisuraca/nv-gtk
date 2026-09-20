@@ -15,7 +15,9 @@ fn main() {
         .application_id("org.notational.velocity")
         .build();
 
-    app.connect_activate(window::build_ui);
+    app.connect_activate(|app| {
+        let _handles = window::build_ui(app);
+    });
 
     app.run();
 }
