@@ -40,7 +40,10 @@ Aprobado por el usuario con panel de resultados en modo overlay.
         real (`connect_size_allocate` no existe en gtk4-rs 0.9; el signal
         "size-allocate" no marshalea con `connect_closure`).
       - En vertical: `paned.set_orientation(Vertical)`, ocultar `list_scroll`,
-        `set_position(0)`.
+        POSICIONAR el divisor en la altura natural del pane superior (medida con
+        `preferred_size`) para que la barra de búsqueda quede SIEMPRE visible.
+        (Fix `1318d58`: `set_position(0)` original colapsaba la barra — bug
+        encontrado por el usuario al probar.)
       - En horizontal: restaurar `Orientation::Horizontal`, posición 300, lista visible.
       - Estado `is_portrait: Rc<Cell<bool>>` compartido.
       - Evidencia: build+test verdes; smoke test xvfb con resize 500x800 y
@@ -81,12 +84,11 @@ lo aprueba el usuario.
     `update_results_visibility` expuestos en `UiHandles`: vertical rota el Paned
     y oculta la lista; con query real "proy" el overlay queda visible; volver a
     horizontal restaura el split clásico.
-- Smoke xvfb + i3 + xdotool (screenshots `/tmp/nv-shots2`): resize 500x800
-  conmuta el layout (A→B: ~49.7k px); Ctrl+K abre el overlay / Esc lo cierra
-  (D→E y E→F: ~4.5k px; W→V y V→U: ~3.6k px) — el overlay PINTA sobre el
-  editor. El typing headless no aterriza en el buscador (sin foco X real);
-  `search-changed` en GTK4 solo emite ante cambio interactivo del usuario
-  (set_text programático no lo emite), cubierto por la regla unitaria.
-- Refactor de verificación: `build_ui` devuelve `UiHandles` (widgets + seams) y
-  `main.rs` descarta el handle en el closure de `connect_activate`.
+- Smoke xvfb + i3 + xdotool (screenshots `/tmp/nv-shots2`, `/tmp/nv-shots3`):
+  resize 500x800 conmuta el layout; Ctrl+K abre el overlay / Esc lo cierra
+  (D→E y E→F: ~4.5k px; W→V y V→U: ~3.6k px). Tras el fix `1318d58`, la franja
+  superior en portrait muestra la barra (histograma: gris del entry #E6E6E7 +
+  #FAFAFB, editor blanco debajo desde y≈64).
 - Commit: `ba34aed` feat(ui): responsive portrait search overlay + tests.
+- Fix barra colapsada: `1318d58` (reporte del usuario al probar: faltaba la
+  barra arriba; el overlay sí se abría con Ctrl+L+typing).
