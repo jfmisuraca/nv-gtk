@@ -9,8 +9,9 @@ use gtk4::{
     Overlay, ScrolledWindow, SelectionMode, Separator, TextTag, TextView, TextWindowType,
 };
 
-use crate::app_state::{timestamp_title, AppState};
+use crate::app_state::AppState;
 use crate::wiki_link::extract_wiki_links;
+use nv_core::util::timestamp_title;
 
 /// Estado del panel de autocompletado de wiki-links
 #[derive(Clone, Default)]

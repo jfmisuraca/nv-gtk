@@ -11,11 +11,12 @@ use gtk4::{
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
 
-use crate::app_state::{timestamp_title, AppState};
-use crate::config::Config;
-use crate::search::search_notes;
-use crate::storage::StorageManager;
+use crate::app_state::AppState;
 use crate::wiki_autocomplete::WikiAutocomplete;
+use nv_core::config::Config;
+use nv_core::search::search_notes;
+use nv_core::storage::StorageManager;
+use nv_core::util::timestamp_title;
 
 /// Handles a los widgets clave de la UI. Los expone `build_ui` para poder
 /// probar el comportamiento responsivo sin depender del display server.
@@ -250,7 +251,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
     // Helper functions for UI refresh
     // Construye una fila de lista para una nota; la comparten la sidebar y el
     // overlay de resultados del modo vertical.
-    let build_note_row = move |note: &crate::note::Note| -> ListBoxRow {
+    let build_note_row = move |note: &nv_core::note::Note| -> ListBoxRow {
         let row_box = GtkBox::new(Orientation::Vertical, 2);
         row_box.set_margin_start(10);
         row_box.set_margin_end(10);

@@ -1,6 +1,6 @@
-use crate::app_state::timestamp_title_with_seconds;
 use crate::config::Config;
 use crate::note::Note;
+use crate::util::timestamp_title_with_seconds;
 use std::fs;
 use std::path::PathBuf;
 

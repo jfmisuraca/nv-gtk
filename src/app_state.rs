@@ -1,8 +1,7 @@
-use chrono::Local;
 use gtk4::glib;
 
-use crate::config::Config;
-use crate::storage::StorageManager;
+use nv_core::config::Config;
+use nv_core::storage::StorageManager;
 use crate::wiki_link::WikiLink;
 
 /// Estado central de la aplicación: configuración, notas cargadas, filtro de
@@ -16,15 +15,4 @@ pub struct AppState {
     pub save_timeout_source: Option<glib::SourceId>,
     pub is_updating_ui: bool,
     pub current_wiki_links: Vec<WikiLink>,
-}
-
-/// Genera un título único basado en la fecha/hora actual: YYYYMMDD-HHMM
-pub fn timestamp_title() -> String {
-    Local::now().format("%Y%m%d-%H%M").to_string()
-}
-
-/// Versión con segundos (YYYYMMDD-HHMMSS): desambiguar notas creadas dentro
-/// del mismo minuto cuando el título base ya está ocupado.
-pub fn timestamp_title_with_seconds() -> String {
-    Local::now().format("%Y%m%d-%H%M%S").to_string()
 }
