@@ -89,4 +89,4 @@ lo aprueba el usuario.
   (set_text programático no lo emite), cubierto por la regla unitaria.
 - Refactor de verificación: `build_ui` devuelve `UiHandles` (widgets + seams) y
   `main.rs` descarta el handle en el closure de `connect_activate`.
-- Commit: `feat(ui): responsive portrait search overlay + tests` (hash al cierre).
+- Commit: `ba34aed` feat(ui): responsive portrait search overlay + tests.
