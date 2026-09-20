@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use gtk4::gdk::{self, Key};
@@ -17,7 +17,25 @@ use crate::search::search_notes;
 use crate::storage::StorageManager;
 use crate::wiki_autocomplete::WikiAutocomplete;
 
-pub fn build_ui(app: &Application) {
+/// Handles a los widgets clave de la UI. Los expone `build_ui` para poder
+/// probar el comportamiento responsivo sin depender del display server.
+#[derive(Clone)]
+#[allow(dead_code)]
+pub struct UiHandles {
+    pub window: ApplicationWindow,
+    pub paned: Paned,
+    pub list_scroll: ScrolledWindow,
+    pub search_entry: SearchEntry,
+    pub list_box: ListBox,
+    pub results_panel: GtkBox,
+    pub results_list_box: ListBox,
+    pub text_view: TextView,
+    pub is_portrait: Rc<Cell<bool>>,
+    pub apply_layout: Rc<dyn Fn(bool)>,
+    pub update_results_visibility: Rc<dyn Fn()>,
+}
+
+pub fn build_ui(app: &Application) -> UiHandles {
     let config = Config::load();
     let storage = StorageManager::new(&config);
     let initial_filtered: Vec<String> = storage.notes.iter().map(|n| n.id.clone()).collect();
@@ -93,6 +111,31 @@ pub fn build_ui(app: &Application) {
     editor_overlay.set_child(Some(&text_scroll));
     editor_box.append(&editor_overlay);
 
+    // Panel de resultados para el modo vertical: overlay con la lista de notas
+    // mientras el buscador está activo, misma estética que el autocomplete.
+    let results_list_box = ListBox::new();
+    results_list_box.set_selection_mode(SelectionMode::Single);
+    results_list_box.add_css_class("navigation-sidebar");
+
+    let results_scroll = ScrolledWindow::builder()
+        .child(&results_list_box)
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .max_content_height(400)
+        .propagate_natural_height(true)
+        .build();
+
+    let results_panel = GtkBox::new(Orientation::Vertical, 0);
+    results_panel.append(&results_scroll);
+    results_panel.add_css_class("nv-autocomplete-panel");
+    results_panel.set_halign(Align::Fill);
+    results_panel.set_valign(Align::Start);
+    results_panel.set_margin_start(8);
+    results_panel.set_margin_end(8);
+    results_panel.set_margin_top(4);
+    results_panel.set_visible(false);
+
+    editor_overlay.add_overlay(&results_panel);
+
     // Status Footer
     let status_box = GtkBox::new(Orientation::Horizontal, 12);
     status_box.set_margin_start(16);
@@ -115,7 +158,146 @@ pub fn build_ui(app: &Application) {
     paned.set_end_child(Some(&editor_box));
     window.set_content(Some(&paned));
 
+    // ── Responsive layout ─────────────────────────────────────────────
+    // Estado compartido del modo vertical (ventana más alta que ancha).
+    let is_portrait = Rc::new(Cell::new(false));
+
+    // Muestra/oculta el overlay de resultados de búsqueda del modo vertical.
+    let set_results_visible = {
+        let results_panel = results_panel.clone();
+        move |visible: bool| results_panel.set_visible(visible)
+    };
+
+    // Regla de visibilidad del overlay de resultados en modo vertical: visible
+    // cuando el buscador tiene foco o hay una query activa. Se expone como
+    // Rc<dyn Fn> para que los tests apliquen la regla sin depender del foco X.
+    let update_results_visibility: Rc<dyn Fn()> = Rc::new({
+        let search_entry = search_entry.clone();
+        let set_results_visible = set_results_visible.clone();
+        let is_portrait = Rc::clone(&is_portrait);
+
+        move || {
+            let focused = search_entry.has_focus();
+            let query = search_entry.text().to_string();
+            let should_show = results_overlay_visible(is_portrait.get(), focused, &query);
+            set_results_visible(should_show);
+        }
+    });
+
+    // Aplica el layout según la orientación real de la ventana. En vertical el
+    // buscador queda arriba de todo y la lista de notas queda oculta; en
+    // horizontal se restaura el split clásico de dos paneles. Se expone como
+    // Rc<dyn Fn> para que los tests lo disparen sin depender del frame clock.
+    let apply_layout: Rc<dyn Fn(bool)> = Rc::new({
+        let paned = paned.clone();
+        let list_scroll = list_scroll.clone();
+        let left_box = left_box.clone();
+        let is_portrait = Rc::clone(&is_portrait);
+        let update_results_visibility = update_results_visibility.clone();
+
+        move |portrait: bool| {
+            if is_portrait.get() == portrait {
+                return;
+            }
+            is_portrait.set(portrait);
+
+            if portrait {
+                paned.set_orientation(Orientation::Vertical);
+                list_scroll.set_visible(false);
+                // El pane superior contiene la barra de búsqueda: posicionar el
+                // divisor en su altura natural (con la lista oculta) para que la
+                // barra quede SIEMPRE visible arriba. set_position(0) la colapsaba.
+                let (_, natural) = left_box.preferred_size();
+                paned.set_position(natural.height().max(48) as i32);
+            } else {
+                paned.set_orientation(Orientation::Horizontal);
+                paned.set_position(300);
+                list_scroll.set_visible(true);
+            }
+
+            update_results_visibility();
+        }
+    });
+
+    // La lista "activa" depende del modo: en vertical los resultados viven en el
+    // overlay; en horizontal, en la sidebar clásica.
+    let active_list_box = {
+        let list_box = list_box.clone();
+        let results_list_box = results_list_box.clone();
+        let is_portrait = Rc::clone(&is_portrait);
+
+        move || {
+            if is_portrait.get() {
+                results_list_box.clone()
+            } else {
+                list_box.clone()
+            }
+        }
+    };
+
+    // Detecta la orientación en cada re-alocación: height > width = vertical.
+    // Se usa el tick callback porque el signal "size-allocate" no está expuesto
+    // como connect_* en gtk4-rs 0.9.
+    window.add_tick_callback({
+        let apply_layout = apply_layout.clone();
+        move |win, _frame_clock| {
+            let portrait = win.height() > win.width();
+            apply_layout(portrait);
+            glib::ControlFlow::Continue
+        }
+    });
+
     // Helper functions for UI refresh
+    // Construye una fila de lista para una nota; la comparten la sidebar y el
+    // overlay de resultados del modo vertical.
+    let build_note_row = move |note: &crate::note::Note| -> ListBoxRow {
+        let row_box = GtkBox::new(Orientation::Vertical, 2);
+        row_box.set_margin_start(10);
+        row_box.set_margin_end(10);
+        row_box.set_margin_top(6);
+        row_box.set_margin_bottom(6);
+
+        let display_title = note
+            .content
+            .lines()
+            .map(|l| l.trim())
+            .find(|l| !l.is_empty())
+            .unwrap_or("(nota vacía)")
+            .to_string();
+
+        let title_label = Label::new(Some(&display_title));
+        title_label.set_halign(Align::Fill);
+        title_label.set_xalign(0.0);
+        title_label.add_css_class("heading");
+        title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        title_label.set_max_width_chars(1);
+        title_label.set_hexpand(true);
+        title_label.set_tooltip_text(Some(&display_title));
+
+        let meta_str = format!(
+            "{} (creada {}) • {}",
+            note.formatted_date(),
+            note.formatted_created_date(),
+            note.tags.join(" ")
+        );
+        let meta_label = Label::new(Some(&meta_str));
+        meta_label.set_halign(Align::Fill);
+        meta_label.set_xalign(0.0);
+        meta_label.add_css_class("caption");
+        meta_label.add_css_class("dim-label");
+        meta_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        meta_label.set_max_width_chars(1);
+        meta_label.set_hexpand(true);
+        meta_label.set_tooltip_text(Some(&meta_str));
+
+        row_box.append(&title_label);
+        row_box.append(&meta_label);
+
+        let row = ListBoxRow::new();
+        row.set_child(Some(&row_box));
+        row
+    };
+
     // Reconstruye la lista desde el estado REAL de storage (NOTA: usa `filtered_indices` ya
     // derivadas correctamente). Se llama tras un save para que el sidebar refleje el nuevo
     // orden del re-sort — de lo contrario navegar por índice (Ctrl+J/K) tras guardar puede
@@ -123,13 +305,18 @@ pub fn build_ui(app: &Application) {
     let populate_list = {
         let state = Rc::clone(&state);
         let list_box = list_box.clone();
+        let results_list_box = results_list_box.clone();
         let status_label = status_label.clone();
         let search_entry = search_entry.clone();
+        let build_note_row = build_note_row.clone();
 
         move || {
-            // Remove all rows
+            // Remove all rows from both lists (sidebar + portrait overlay)
             while let Some(child) = list_box.first_child() {
                 list_box.remove(&child);
+            }
+            while let Some(child) = results_list_box.first_child() {
+                results_list_box.remove(&child);
             }
 
             let st = state.borrow();
@@ -137,50 +324,8 @@ pub fn build_ui(app: &Application) {
 
             for id in &st.filtered_indices {
                 if let Some(note) = st.storage.get_note(id) {
-                    let row = ListBoxRow::new();
-                    let row_box = GtkBox::new(Orientation::Vertical, 2);
-                    row_box.set_margin_start(10);
-                    row_box.set_margin_end(10);
-                    row_box.set_margin_top(6);
-                    row_box.set_margin_bottom(6);
-
-                    let display_title = note
-                        .content
-                        .lines()
-                        .map(|l| l.trim())
-                        .find(|l| !l.is_empty())
-                        .unwrap_or("(nota vacía)")
-                        .to_string();
-
-                    let title_label = Label::new(Some(&display_title));
-                    title_label.set_halign(Align::Fill);
-                    title_label.set_xalign(0.0);
-                    title_label.add_css_class("heading");
-                    title_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-                    title_label.set_max_width_chars(1);
-                    title_label.set_hexpand(true);
-                    title_label.set_tooltip_text(Some(&display_title));
-
-                    let meta_str = format!(
-                        "{} (creada {}) • {}",
-                        note.formatted_date(),
-                        note.formatted_created_date(),
-                        note.tags.join(" ")
-                    );
-                    let meta_label = Label::new(Some(&meta_str));
-                    meta_label.set_halign(Align::Fill);
-                    meta_label.set_xalign(0.0);
-                    meta_label.add_css_class("caption");
-                    meta_label.add_css_class("dim-label");
-                    meta_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-                    meta_label.set_max_width_chars(1);
-                    meta_label.set_hexpand(true);
-                    meta_label.set_tooltip_text(Some(&meta_str));
-
-                    row_box.append(&title_label);
-                    row_box.append(&meta_label);
-                    row.set_child(Some(&row_box));
-                    list_box.append(&row);
+                    list_box.append(&build_note_row(note));
+                    results_list_box.append(&build_note_row(note));
                 }
             }
 
@@ -199,14 +344,15 @@ pub fn build_ui(app: &Application) {
     // restaurar la selección visual por índice sin disparar el echo del buffer.
     let select_row_by_id = {
         let state = Rc::clone(&state);
-        let list_box = list_box.clone();
+        let active_list_box = active_list_box.clone();
 
         move |target_id: &str| {
+            let lb = active_list_box();
             let st = state.borrow();
             if let Some(pos) = st.filtered_indices.iter().position(|id| id == target_id) {
-                if let Some(row) = list_box.row_at_index(pos as i32) {
+                if let Some(row) = lb.row_at_index(pos as i32) {
                     drop(st);
-                    list_box.select_row(Some(&row));
+                    lb.select_row(Some(&row));
                 }
             }
         }
@@ -328,7 +474,7 @@ pub fn build_ui(app: &Application) {
     let select_note_by_id = {
         let state = Rc::clone(&state);
         let text_view = text_view.clone();
-        let list_box = list_box.clone();
+        let active_list_box = active_list_box.clone();
         let info_label = info_label.clone();
         let flush_pending_save = flush_pending_save.clone();
         let wiki = wiki.clone();
@@ -362,8 +508,9 @@ pub fn build_ui(app: &Application) {
                 info_label.set_text(&format!("{} palabras | {} caracteres", words, chars));
 
                 if let Some(pos) = pos_to_select {
-                    if let Some(row) = list_box.row_at_index(pos as i32) {
-                        list_box.select_row(Some(&row));
+                    let lb = active_list_box();
+                    if let Some(row) = lb.row_at_index(pos as i32) {
+                        lb.select_row(Some(&row));
                     }
                 }
             }
@@ -412,8 +559,19 @@ pub fn build_ui(app: &Application) {
     // Connect Search Entry changed signal
     search_entry.connect_search_changed({
         let update_search = update_search.clone();
+        let update_results_visibility = update_results_visibility.clone();
         move |_| {
             update_search();
+            update_results_visibility();
+        }
+    });
+
+    // Al entrar/salir el foco del buscador se actualiza el overlay de resultados
+    // del modo vertical (visible mientras está enfocado o hay query activa).
+    search_entry.connect_notify_local(Some("has-focus"), {
+        let update_results_visibility = update_results_visibility.clone();
+        move |_se, _spec| {
+            update_results_visibility();
         }
     });
 
@@ -424,6 +582,7 @@ pub fn build_ui(app: &Application) {
         let text_view = text_view.clone();
         let populate_list = populate_list.clone();
         let select_note_by_id = select_note_by_id.clone();
+        let set_results_visible = set_results_visible.clone();
 
         move |_| {
             let query = search_entry.text().to_string();
@@ -453,6 +612,8 @@ pub fn build_ui(app: &Application) {
                 select_note_by_id(&id);
             }
             text_view.grab_focus();
+            // En vertical, Enter cierra el overlay de resultados.
+            set_results_visible(false);
         }
     });
 
@@ -471,6 +632,30 @@ pub fn build_ui(app: &Application) {
 
             if let Some(id) = target_id {
                 select_note_by_id(&id);
+            }
+        }
+    });
+
+    // Al activar una fila del overlay de resultados (modo vertical) se abre la
+    // nota y se cierra el overlay.
+    results_list_box.connect_row_activated({
+        let state = Rc::clone(&state);
+        let select_note_by_id = select_note_by_id.clone();
+        let set_results_visible = set_results_visible.clone();
+        let is_portrait = Rc::clone(&is_portrait);
+
+        move |_, row| {
+            let idx = row.index() as usize;
+            let target_id = {
+                let st = state.borrow();
+                st.filtered_indices.get(idx).cloned()
+            };
+
+            if let Some(id) = target_id {
+                select_note_by_id(&id);
+            }
+            if is_portrait.get() {
+                set_results_visible(false);
             }
         }
     });
@@ -590,11 +775,20 @@ pub fn build_ui(app: &Application) {
     // Mueve la selección de la lista de notas hacia abajo (+1) o arriba (-1) y la abre
     let move_list_selection = {
         let state = Rc::clone(&state);
-        let list_box = list_box.clone();
+        let active_list_box = active_list_box.clone();
         let select_note_by_id = select_note_by_id.clone();
+        let is_portrait = Rc::clone(&is_portrait);
+        let set_results_visible = set_results_visible.clone();
 
         move |delta: i32| {
-            let current_index = list_box
+            let lb = active_list_box();
+
+            // En vertical, navegar con J/K muestra el overlay si estaba oculto.
+            if is_portrait.get() && !lb.is_visible() {
+                set_results_visible(true);
+            }
+
+            let current_index = lb
                 .selected_row()
                 .map(|row| row.index())
                 .unwrap_or(-1);
@@ -604,8 +798,8 @@ pub fn build_ui(app: &Application) {
                 return;
             }
 
-            if let Some(row) = list_box.row_at_index(target_index) {
-                list_box.select_row(Some(&row));
+            if let Some(row) = lb.row_at_index(target_index) {
+                lb.select_row(Some(&row));
                 row.grab_focus();
 
                 let idx = target_index as usize;
@@ -616,6 +810,13 @@ pub fn build_ui(app: &Application) {
                 if let Some(id) = target_id {
                     select_note_by_id(&id);
                 }
+
+                // Al abrir la nota el foco pasa al editor y la regla de visibilidad
+                // podría ocultar el overlay (query vacía); lo mantenemos visible
+                // para poder seguir navegando con J/K.
+                if is_portrait.get() {
+                    set_results_visible(true);
+                }
             }
         }
     };
@@ -625,6 +826,10 @@ pub fn build_ui(app: &Application) {
     key_controller.connect_key_pressed({
         let search_entry = search_entry.clone();
         let _list_box = list_box.clone();
+        let text_view = text_view.clone();
+        let results_panel = results_panel.clone();
+        let is_portrait = Rc::clone(&is_portrait);
+        let set_results_visible = set_results_visible.clone();
         let create_new_empty_note = create_new_empty_note.clone();
         let delete_current_note = delete_current_note.clone();
         let move_list_selection = move_list_selection.clone();
@@ -660,8 +865,15 @@ pub fn build_ui(app: &Application) {
                     glib::Propagation::Stop
                 }
                 Key::Escape => {
-                    search_entry.grab_focus();
-                    search_entry.select_region(0, -1);
+                    // En vertical, Esc cierra el overlay de resultados si está
+                    // visible; si no, enfoca el buscador (comportamiento previo).
+                    if is_portrait.get() && results_panel.is_visible() {
+                        set_results_visible(false);
+                        text_view.grab_focus();
+                    } else {
+                        search_entry.grab_focus();
+                        search_entry.select_region(0, -1);
+                    }
                     glib::Propagation::Stop
                 }
                 _ => glib::Propagation::Proceed,
@@ -681,4 +893,122 @@ pub fn build_ui(app: &Application) {
     });
 
     window.present();
+
+    UiHandles {
+        window: window.clone(),
+        paned: paned.clone(),
+        list_scroll: list_scroll.clone(),
+        search_entry: search_entry.clone(),
+        list_box: list_box.clone(),
+        results_panel: results_panel.clone(),
+        results_list_box: results_list_box.clone(),
+        text_view: text_view.clone(),
+        is_portrait: Rc::clone(&is_portrait),
+        apply_layout,
+        update_results_visibility,
+    }
+}
+
+/// Regla de visibilidad del overlay de resultados en modo vertical: se muestra
+/// cuando la ventana es vertical y el buscador tiene foco o hay una query
+/// activa (no vacía al recortar espacios).
+fn results_overlay_visible(portrait: bool, focused: bool, query: &str) -> bool {
+    portrait && (focused || !query.trim().is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Procesa eventos pendientes del main loop de GTK varias rondas.
+    fn pump(rounds: usize) {
+        let ctx = gtk4::glib::MainContext::default();
+        for _ in 0..rounds {
+            while ctx.pending() {
+                ctx.iteration(false);
+            }
+        }
+    }
+
+    #[test]
+    fn results_overlay_visibility_rule() {
+        // Sin orientación vertical el overlay nunca se muestra.
+        for focused in [false, true] {
+            for q in ["", "proy", "   ", " x "] {
+                assert!(!results_overlay_visible(false, focused, q));
+            }
+        }
+        // Vertical: foco o query no-vacía lo muestran; sin foco y query vacía, no.
+        assert!(!results_overlay_visible(true, false, ""));
+        assert!(!results_overlay_visible(true, false, "   "));
+        assert!(results_overlay_visible(true, true, ""));
+        assert!(results_overlay_visible(true, true, "proy"));
+        assert!(results_overlay_visible(true, false, "proy"));
+        assert!(results_overlay_visible(true, false, "  x"));
+    }
+
+    // Requiere display: `xvfb-run -a cargo test -- --test-threads=1`
+    // La orientación la dispara el tick callback (probado por smoke: al
+    // redimensionar 500x800 el log muestra `apply_layout -> portrait=true`);
+    // aquí se usa el seam expuesto para probar el layout de forma determinista.
+    #[test]
+    fn responsive_portrait_layout_and_overlay() {
+        // Requiere un display de verdad: se corre con
+        // `xvfb-run -a cargo test -- --test-threads=1`. Sin display el test se
+        // omite; la regla pura queda cubierta por `results_overlay_visibility_rule`.
+        gtk4::init().expect("gtk init");
+        if gdk::Display::default().is_none() {
+            eprintln!("skipping responsive test: no display available");
+            return;
+        }
+
+        let app = Application::builder()
+            .application_id("org.notational.velocity.responsive-test")
+            .build();
+        let handles = build_ui(&app);
+        pump(60);
+
+        // Estado inicial: split horizontal clásico sin overlay.
+        assert_eq!(handles.paned.orientation(), Orientation::Horizontal);
+        assert!(handles.list_scroll.is_visible());
+        assert!(!handles.results_panel.is_visible());
+
+        // Modo vertical: el paned rota y la lista queda oculta.
+        (handles.apply_layout)(true);
+        pump(40);
+        assert_eq!(handles.paned.orientation(), Orientation::Vertical);
+        assert!(!handles.list_scroll.is_visible());
+        assert!(handles.is_portrait.get());
+        // La barra de búsqueda vive en el pane superior: el divisor debe quedar
+        // en su altura natural (regresión: set_position(0) la colapsaba).
+        assert!(
+            handles.paned.position() >= 32,
+            "la barra de búsqueda debe quedar visible arriba (position={})",
+            handles.paned.position()
+        );
+
+        // Una query activa dispara el flujo de búsqueda y muestra el overlay.
+        // En el test headless no hay foco X ni se puede sintetizar typing real
+        // (set_text no emite search-changed en GTK4), así que se aplica la
+        // misma regla que ejecuta el handler de search-changed: con la query
+        // real ya en el entry y portrait=true, el overlay debe quedar visible.
+        handles.search_entry.set_text("proy");
+        pump(40);
+        assert_eq!(handles.search_entry.text().to_string(), "proy");
+        (handles.update_results_visibility)();
+        pump(40);
+        assert!(
+            handles.results_panel.is_visible(),
+            "el overlay debe mostrarse con query activa en modo vertical"
+        );
+
+        // Volver a horizontal restaura el split clásico.
+        (handles.apply_layout)(false);
+        (handles.update_results_visibility)();
+        pump(40);
+        assert_eq!(handles.paned.orientation(), Orientation::Horizontal);
+        assert!(handles.list_scroll.is_visible());
+        assert!(!handles.results_panel.is_visible());
+        assert!(!handles.is_portrait.get());
+    }
 }
