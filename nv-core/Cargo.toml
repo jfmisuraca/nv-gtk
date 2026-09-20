@@ -1,0 +1,22 @@
+[package]
+name = "nv_core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "nv_core"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+chrono = "0.4"
+regex = "1.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+dirs = "5.0"
+fuzzy-matcher = "0.3"
+uniffi = { version = "0.32", features = ["cli"] }
