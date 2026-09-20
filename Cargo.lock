@@ -733,12 +733,20 @@ dependencies = [
 name = "nv-gtk"
 version = "0.1.0"
 dependencies = [
- "chrono",
- "dirs",
- "fuzzy-matcher",
  "gtk4",
  "libadwaita",
  "notify",
+ "nv_core",
+ "regex",
+]
+
+[[package]]
+name = "nv_core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs",
+ "fuzzy-matcher",
  "regex",
  "serde",
  "serde_json",

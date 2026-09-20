@@ -1,13 +1,13 @@
 # Storage contract (nv-gtk ↔ Android parity)
 
-Source of truth is the desktop code (`src/storage.rs`, `src/note.rs`,
-`src/config.rs`, `src/app_state.rs`). This spec freezes its *observable*
+Source of truth is the desktop code (`nv-core/src/storage.rs`, `nv-core/src/note.rs`,
+`nv-core/src/config.rs`, `nv-core/src/util.rs`). This spec freezes its *observable*
 behavior so a future Android implementation can match it exactly.
 Nothing here invents behavior: every rule cites the code that implements it.
 
 ## 1. Notes directory
 
-- The notes directory comes from `Config::notes_dir` (`src/config.rs`).
+- The notes directory comes from `Config::notes_dir` (`nv-core/src/config.rs`).
 - Default is `$HOME/Notes` with `default_extension = "md"` (`Config::default`).
 - The config file is `<config_dir>/nv-gtk/config.json`
   (`Config::config_path`); `Config::load` reads it when present and valid,
@@ -22,7 +22,7 @@ notes; a missing directory is created, never an error.
 
 ## 2. Valid extensions
 
-- `StorageManager::reload` (`src/storage.rs`) iterates the notes directory
+- `StorageManager::reload` (`nv-core/src/storage.rs`) iterates the notes directory
   (non-recursive, files only) and loads **only** files whose extension is
   exactly `md`, `txt`, or `markdown`.
 - The comparison is case-sensitive (`ext == "md"`, …): `NOTE.MD` is ignored.
@@ -34,7 +34,7 @@ Observable: dropping `a.md`, `b.txt`, `c.markdown`, `d.rs`, `e.MD`, and
 
 ## 3. Identity: id = filename stem
 
-- `Note::from_file` (`src/note.rs`) sets `id` to the file's stem
+- `Note::from_file` (`nv-core/src/note.rs`) sets `id` to the file's stem
   (`path.file_stem()`), i.e. the filename without extension.
 - `Note::new` sets `id` to the sanitized title (`/` → `-`); the file is
   `<title>.<default_extension>` inside the notes directory.
@@ -76,7 +76,7 @@ nothing.
 
 - `modified_at` = filesystem mtime; if mtime is unavailable, now.
 - `created_at` = filesystem birthtime; if unavailable (common on Linux),
-  falls back to mtime (`src/note.rs`, `from_file`).
+  falls back to mtime (`nv-core/src/note.rs`, `from_file`).
 - `Note::new` stamps both with `Local::now()`; `save` refreshes
   `modified_at` to now but leaves `created_at` untouched.
 
@@ -95,11 +95,11 @@ it toward the top.
 
 ## 8. Collisions and save semantics
 
-- Creation (`StorageManager::create_note`, `src/storage.rs`): if the
+- Creation (`StorageManager::create_note`, `nv-core/src/storage.rs`): if the
   requested title already exists — checked case-insensitively against loaded
   titles **or** as `<title>.<default_extension>` on disk
   (`note_title_exists`) — the note is instead created with
-  `timestamp_title_with_seconds()` (`%Y%m%d-%H%M%S` from `src/app_state.rs`),
+  `timestamp_title_with_seconds()` (`%Y%m%d-%H%M%S` from `nv-core/src/util.rs`),
   appending `-<counter>` while that also exists. The original file is never
   overwritten.
 - Save (`StorageManager::save_note`): writes the file **only** when content
