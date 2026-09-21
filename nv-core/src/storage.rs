@@ -64,10 +64,10 @@ impl StorageManager {
         // timestamp base AAAAMMDD-HHMM. En ese caso la nueva se crea con segundos
         // (AAAAMMDD-HHMMSS), y con un contador si ese también existe. Así nunca se
         // devuelve ni se sobreescribe la nota original.
-        let unique_title = if self.note_title_exists(display_title) {
+        let unique_title = if self.title_taken(display_title, None) {
             let mut candidate = timestamp_title_with_seconds();
             let mut counter = 1u32;
-            while self.note_title_exists(&candidate) {
+            while self.title_taken(&candidate, None) {
                 candidate = format!("{}-{}", timestamp_title_with_seconds(), counter);
                 counter += 1;
             }
@@ -82,12 +82,60 @@ impl StorageManager {
         Ok(note)
     }
 
-    /// Devuelve `true` si ya existe una nota con ese nombre, en memoria
-    /// (comparando sin distinguir mayúsculas, como antes) o como archivo en disco.
-    fn note_title_exists(&self, title: &str) -> bool {
+    /// Renames a note (new filename stem): moves the file and updates
+    /// id/title. Blank titles become "Untitled", `/` becomes `-`, and taken
+    /// names disambiguate timestamp-style like creation (excluding the note
+    /// itself, so case-only renames work).
+    /// Content, tags and dates are preserved: `rename` keeps mtime, so the
+    /// list order does not move. `Ok(None)` when the id is unknown. On move
+    /// failure the note is kept as-is and `Err` is returned.
+    pub fn rename_note(&mut self, id: &str, new_title: &str) -> std::io::Result<Option<Note>> {
+        let Some(idx) = self.notes.iter().position(|n| n.id == id) else {
+            return Ok(None);
+        };
+        let clean = new_title.trim();
+        let want = if clean.is_empty() {
+            "Untitled".to_string()
+        } else {
+            clean.replace('/', "-")
+        };
+        if want == self.notes[idx].title {
+            return Ok(Some(self.notes[idx].clone()));
+        }
+        let final_title = if self.title_taken(&want, Some(id)) {
+            let mut candidate = timestamp_title_with_seconds();
+            let mut counter = 1u32;
+            while self.title_taken(&candidate, Some(id)) {
+                candidate = format!("{}-{counter}", timestamp_title_with_seconds());
+                counter += 1;
+            }
+            candidate
+        } else {
+            want
+        };
+        let mut note = self.notes.remove(idx);
+        let target = self
+            .notes_dir
+            .join(format!("{final_title}.{}", self.default_extension));
+        if let Err(e) = fs::rename(&note.filepath, &target) {
+            self.notes.push(note);
+            self.notes.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+            return Err(e);
+        }
+        note.filepath = target;
+        note.id = final_title.clone();
+        note.title = final_title;
+        self.notes.push(note.clone());
+        self.notes.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+        Ok(Some(note))
+    }
+
+    /// Whether `title` is taken by another note (memory, case-insensitive)
+    /// or by a file on disk. `exclude_id` skips one note (for renames).
+    fn title_taken(&self, title: &str, exclude_id: Option<&str>) -> bool {
         self.notes
             .iter()
-            .any(|n| n.title.eq_ignore_ascii_case(title))
+            .any(|n| Some(n.id.as_str()) != exclude_id && n.title.eq_ignore_ascii_case(title))
             || self
                 .notes_dir
                 .join(format!("{}.{}", title, self.default_extension))
@@ -149,7 +197,7 @@ impl StorageManager {
         if target.exists() || self.notes.iter().any(|n| n.id == entry.id) {
             let mut candidate = timestamp_title_with_seconds();
             let mut counter = 1u32;
-            while self.note_title_exists(&candidate) {
+            while self.title_taken(&candidate, None) {
                 candidate = format!("{}-{}", timestamp_title_with_seconds(), counter);
                 counter += 1;
             }
@@ -525,8 +573,7 @@ mod tests {
     }
 
     #[test]
-    fn purge_and_empty_trash() {
-        let dir = temp_notes_dir();
+    fn purge_and_empty_trash() {        let dir = temp_notes_dir();
         write_file(&dir, "a.md", "a");
         write_file(&dir, "b.md", "b");
         let mut storage = test_storage(&dir);
@@ -542,6 +589,70 @@ mod tests {
         assert_eq!(storage.empty_trash().unwrap(), 1);
         assert!(storage.trash_notes().is_empty());
         assert_eq!(storage.empty_trash().unwrap(), 0);
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rename_moves_file_and_preserves_content_tags_and_dates() {
+        let dir = temp_notes_dir();
+        let path = write_file(&dir, "old.md", "body #beta #alpha");
+        backdate(&path, 120);
+        let before_mtime = fs::metadata(&path).unwrap().modified().unwrap();
+        let mut storage = test_storage(&dir);
+        storage.reload();
+
+        let renamed = storage.rename_note("old", "new").unwrap().unwrap();
+        assert_eq!(renamed.id, "new");
+        assert_eq!(renamed.title, "new");
+        assert_eq!(renamed.content, "body #beta #alpha");
+        assert_eq!(renamed.tags, vec!["alpha", "beta"]);
+        // Same filesystem move: mtime preserved, list order untouched.
+        assert_eq!(
+            fs::metadata(dir.join("new.md"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            before_mtime
+        );
+        assert!(!dir.join("old.md").exists());
+        assert!(storage.get_note("old").is_none());
+        assert_eq!(storage.get_note("new").unwrap().content, "body #beta #alpha");
+
+        // Unknown id and same-name no-op.
+        assert!(storage.rename_note("ghost", "x").unwrap().is_none());
+        let same = storage.rename_note("new", "new").unwrap().unwrap();
+        assert_eq!(same.id, "new");
+        assert!(dir.join("new.md").exists());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rename_disambiguates_collisions_and_sanitizes() {
+        let dir = temp_notes_dir();
+        write_file(&dir, "a.md", "a");
+        write_file(&dir, "b.md", "b");
+        let mut storage = test_storage(&dir);
+        storage.reload();
+
+        // Taken name: never overwrites, gets a distinct id.
+        let renamed = storage.rename_note("a", "b").unwrap().unwrap();
+        assert_ne!(renamed.id, "b");
+        assert_ne!(renamed.id, "a");
+        assert_eq!(fs::read_to_string(dir.join("b.md")).unwrap(), "b");
+        assert_eq!(renamed.content, "a");
+        assert_eq!(storage.notes.len(), 2);
+
+        // Blank becomes Untitled; slashes are sanitized.
+        let untitled = storage.rename_note(&renamed.id, "   ").unwrap().unwrap();
+        assert_eq!(untitled.id, "Untitled");
+        let slashed = storage.rename_note("b", "x/y").unwrap().unwrap();
+        assert_eq!(slashed.id, "x-y");
+
+        // Case-only rename works (self excluded from the taken check).
+        let cased = storage.rename_note("x-y", "X-Y").unwrap().unwrap();
+        assert_eq!(cased.id, "X-Y");
 
         fs::remove_dir_all(&dir).ok();
     }

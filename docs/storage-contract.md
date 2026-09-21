@@ -139,3 +139,16 @@ and tags, and re-sorts the list.
 
 Observable: deleting `a.md` removes it from the list but keeps
 `.trash/a.md`; restoring brings it back; purging or emptying deletes for good.
+
+## 10. Rename (new filename stem)
+
+- `StorageManager::rename_note` (`nv-core/src/storage.rs`) moves the file to
+  `<new-title>.<default_extension>` and updates `id`/`title` together.
+- Blank titles become `"Untitled"`, `/` becomes `-` (same as creation);
+  taken names disambiguate timestamp-style like creation, excluding the note
+  itself (so case-only renames work); the original file is never overwritten.
+- Content, tags and dates are preserved: the move keeps mtime, so a rename
+  does not re-sort the list. Unknown ids return `None` (FFI: `NotFound`).
+
+Observable: renaming `a` to `b` leaves `b.md` with `a`'s content, tags and
+mtime; renaming onto a taken name yields a distinct id.
