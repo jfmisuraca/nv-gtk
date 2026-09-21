@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -15,7 +14,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -47,7 +45,6 @@ fun NoteEditorScreen(
     var text by remember(note.id) { mutableStateOf(note.content) }
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
-    var confirmDelete by remember { mutableStateOf(false) }
 
     fun saveIfChanged(next: () -> Unit) {
         if (text == note.content) {
@@ -76,23 +73,6 @@ fun NoteEditorScreen(
 
     BackHandler { saveIfChanged(onDone) }
 
-    if (confirmDelete) {
-        AlertDialog(
-            onDismissRequest = { confirmDelete = false },
-            title = { Text("¿Borrar nota \"${note.title}\"?") },
-            confirmButton = {
-                TextButton(onClick = { confirmDelete = false; deleteAndClose() }) {
-                    Text("Borrar")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmDelete = false }) {
-                    Text("Cancelar")
-                }
-            }
-        )
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -106,7 +86,7 @@ fun NoteEditorScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = { confirmDelete = true }) {
+                    IconButton(onClick = { deleteAndClose() }) {
                         Icon(Icons.Filled.Delete, contentDescription = "Borrar")
                     }
                 }
