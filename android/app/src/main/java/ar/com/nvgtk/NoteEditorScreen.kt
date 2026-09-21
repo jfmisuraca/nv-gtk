@@ -79,8 +79,7 @@ fun NoteEditorScreen(
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Borrar nota") },
-            text = { Text("¿Borrar \"${note.title}\" para siempre?") },
+            title = { Text("¿Borrar nota \"${note.title}\"?") },
             confirmButton = {
                 TextButton(onClick = { confirmDelete = false; deleteAndClose() }) {
                     Text("Borrar")

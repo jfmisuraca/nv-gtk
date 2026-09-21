@@ -677,9 +677,17 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_nv_core_checksum_method_nvstorage_delete_note(
     ): Int
+    external fun uniffi_nv_core_checksum_method_nvstorage_empty_trash(
+    ): Int
     external fun uniffi_nv_core_checksum_method_nvstorage_get_note(
     ): Int
     external fun uniffi_nv_core_checksum_method_nvstorage_list_notes(
+    ): Int
+    external fun uniffi_nv_core_checksum_method_nvstorage_list_trash(
+    ): Int
+    external fun uniffi_nv_core_checksum_method_nvstorage_purge_note(
+    ): Int
+    external fun uniffi_nv_core_checksum_method_nvstorage_restore_note(
     ): Int
     external fun uniffi_nv_core_checksum_method_nvstorage_save_note(
     ): Int
@@ -715,9 +723,17 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_nv_core_fn_method_nvstorage_delete_note(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    external fun uniffi_nv_core_fn_method_nvstorage_empty_trash(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     external fun uniffi_nv_core_fn_method_nvstorage_get_note(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_nv_core_fn_method_nvstorage_list_notes(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_nv_core_fn_method_nvstorage_list_trash(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_nv_core_fn_method_nvstorage_purge_note(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Byte
+    external fun uniffi_nv_core_fn_method_nvstorage_restore_note(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_nv_core_fn_method_nvstorage_save_note(`ptr`: Long,`id`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -845,13 +861,25 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if ((lib.uniffi_nv_core_checksum_method_nvstorage_create_note() and 0xFFFF) != 45275) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if ((lib.uniffi_nv_core_checksum_method_nvstorage_delete_note() and 0xFFFF) != 25332) {
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_delete_note() and 0xFFFF) != 57331) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_empty_trash() and 0xFFFF) != 37178) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_nv_core_checksum_method_nvstorage_get_note() and 0xFFFF) != 2686) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_nv_core_checksum_method_nvstorage_list_notes() and 0xFFFF) != 45842) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_list_trash() and 0xFFFF) != 32030) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_purge_note() and 0xFFFF) != 22860) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_restore_note() and 0xFFFF) != 34836) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_nv_core_checksum_method_nvstorage_save_note() and 0xFFFF) != 27068) {
@@ -1018,6 +1046,29 @@ private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterULong: FfiConverter<ULong, Long> {
+    override fun lift(value: Long): ULong {
+        return value.toULong()
+    }
+
+    override fun read(buf: ByteBuffer): ULong {
+        return lift(buf.getLong())
+    }
+
+    override fun lower(value: ULong): Long {
+        return value.toLong()
+    }
+
+    override fun allocationSize(value: ULong) = 8UL
+
+    override fun write(value: ULong, buf: ByteBuffer) {
+        buf.putLong(value.toLong())
+    }
 }
 
 /**
@@ -1233,10 +1284,16 @@ public interface NvStorageInterface {
     fun `createNote`(`title`: kotlin.String): NoteSnapshot
     
     /**
-     * Delete by id; `Ok(false)` when the id is unknown (mirrors desktop).
-     * `Err(NvError::Io)` when the file cannot be removed.
+     * Delete moves the note to the app trash (contract rule 9);
+     * `Ok(false)` when the id is unknown (mirrors desktop).
+     * `Err(NvError::Io)` when the file cannot be moved.
      */
     fun `deleteNote`(`id`: kotlin.String): kotlin.Boolean
+    
+    /**
+     * Permanently delete everything in the trash. Returns the purged count.
+     */
+    fun `emptyTrash`(): kotlin.ULong
     
     fun `getNote`(`id`: kotlin.String): NoteSnapshot
     
@@ -1244,6 +1301,23 @@ public interface NvStorageInterface {
      * All notes, newest-modified first (contract rule 7).
      */
     fun `listNotes`(): List<NoteSnapshot>
+    
+    /**
+     * Trashed notes, newest-modified first (contract rule 9).
+     */
+    fun `listTrash`(): List<NoteSnapshot>
+    
+    /**
+     * Permanently delete one trashed note; `Ok(false)` when unknown.
+     */
+    fun `purgeNote`(`id`: kotlin.String): kotlin.Boolean
+    
+    /**
+     * Restore a trashed note; `NotFound` when the id is not in the trash.
+     * The restored snapshot may carry a disambiguated id when its name was
+     * retaken meanwhile (contract rule 9).
+     */
+    fun `restoreNote`(`id`: kotlin.String): NoteSnapshot
     
     /**
      * Overwrite content, refresh mtime/tags, re-sort; returns the updated note.
@@ -1388,8 +1462,9 @@ open class NvStorage: Disposable, AutoCloseable, NvStorageInterface
 
     
     /**
-     * Delete by id; `Ok(false)` when the id is unknown (mirrors desktop).
-     * `Err(NvError::Io)` when the file cannot be removed.
+     * Delete moves the note to the app trash (contract rule 9);
+     * `Ok(false)` when the id is unknown (mirrors desktop).
+     * `Err(NvError::Io)` when the file cannot be moved.
      */
     @Throws(NvException::class)override fun `deleteNote`(`id`: kotlin.String): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -1399,6 +1474,23 @@ open class NvStorage: Disposable, AutoCloseable, NvStorageInterface
         it,
         
         FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Permanently delete everything in the trash. Returns the purged count.
+     */
+    @Throws(NvException::class)override fun `emptyTrash`(): kotlin.ULong {
+            return FfiConverterULong.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NvException) { _status ->
+    UniffiLib.uniffi_nv_core_fn_method_nvstorage_empty_trash(
+        it,
+        _status)
 }
     }
     )
@@ -1430,6 +1522,60 @@ open class NvStorage: Disposable, AutoCloseable, NvStorageInterface
     UniffiLib.uniffi_nv_core_fn_method_nvstorage_list_notes(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Trashed notes, newest-modified first (contract rule 9).
+     */override fun `listTrash`(): List<NoteSnapshot> {
+            return FfiConverterSequenceTypeNoteSnapshot.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_nv_core_fn_method_nvstorage_list_trash(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Permanently delete one trashed note; `Ok(false)` when unknown.
+     */
+    @Throws(NvException::class)override fun `purgeNote`(`id`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NvException) { _status ->
+    UniffiLib.uniffi_nv_core_fn_method_nvstorage_purge_note(
+        it,
+        
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Restore a trashed note; `NotFound` when the id is not in the trash.
+     * The restored snapshot may carry a disambiguated id when its name was
+     * retaken meanwhile (contract rule 9).
+     */
+    @Throws(NvException::class)override fun `restoreNote`(`id`: kotlin.String): NoteSnapshot {
+            return FfiConverterTypeNoteSnapshot.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NvException) { _status ->
+    UniffiLib.uniffi_nv_core_fn_method_nvstorage_restore_note(
+        it,
+        
+        FfiConverterString.lower(`id`),_status)
 }
     }
     )

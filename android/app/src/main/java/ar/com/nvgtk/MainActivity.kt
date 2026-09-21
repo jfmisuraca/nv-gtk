@@ -54,25 +54,53 @@ class MainActivity : ComponentActivity() {
 private fun NvApp(storage: NvStorage) {
     val scope = rememberCoroutineScope()
     var notes by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
+    var trash by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
     var selectedId by remember { mutableStateOf<String?>(null) }
+    var showTrash by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     fun refresh() {
         scope.launch {
-            withContext(Dispatchers.IO) { runCatching { storage.listNotes() } }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    storage.listNotes() to storage.listTrash()
+                }
+            }
+            result
                 .onFailure { error = it.message }
-                .onSuccess { notes = it; error = null }
+                .onSuccess { (freshNotes, freshTrash) ->
+                    notes = freshNotes
+                    trash = freshTrash
+                    error = null
+                }
         }
     }
 
     LaunchedEffect(storage) { refresh() }
 
+    fun ioOp(op: suspend () -> Unit) {
+        scope.launch {
+            withContext(Dispatchers.IO) { runCatching { op() } }
+                .onFailure { error = it.message }
+                .onSuccess { refresh() }
+        }
+    }
+
     val selected = notes.firstOrNull { it.id == selectedId }
-    if (selected == null) {
-        NotesListScreen(
+    when {
+        showTrash -> TrashScreen(
+            trash = trash,
+            error = error,
+            onBack = { showTrash = false },
+            onRestore = { id -> ioOp { storage.restoreNote(id) } },
+            onPurge = { id -> ioOp { storage.purgeNote(id) } },
+            onEmpty = { ioOp { storage.emptyTrash() } }
+        )
+        selected == null -> NotesListScreen(
             notes = notes,
             error = error,
             onOpen = { selectedId = it },
+            onTrash = { showTrash = true },
             onCreate = {
                 scope.launch {
                     withContext(Dispatchers.IO) {
@@ -87,8 +115,7 @@ private fun NvApp(storage: NvStorage) {
                 }
             }
         )
-    } else {
-        NoteEditorScreen(
+        else -> NoteEditorScreen(
             note = selected,
             storage = storage,
             onDone = { selectedId = null; refresh() }
