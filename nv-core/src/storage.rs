@@ -10,6 +10,11 @@ pub struct StorageManager {
     pub notes: Vec<Note>,
 }
 
+/// App trash subdirectory: deleted notes rest here (as plain files, same
+/// formats as the notes dir) until restored or purged. Hidden so file
+/// managers skip it; `reload` never loads from it.
+pub const TRASH_DIR_NAME: &str = ".trash";
+
 impl StorageManager {
     pub fn new(config: &Config) -> Self {
         let mut mgr = Self {
@@ -27,11 +32,9 @@ impl StorageManager {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_file() {
-                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                        if ext == "md" || ext == "txt" || ext == "markdown" {
-                            if let Ok(note) = Note::from_file(&path) {
-                                self.notes.push(note);
-                            }
+                    if is_note_file(&path) {
+                        if let Ok(note) = Note::from_file(&path) {
+                            self.notes.push(note);
                         }
                     }
                 }
@@ -91,18 +94,106 @@ impl StorageManager {
                 .exists()
     }
 
-    /// Removes the note file from disk and drops it from memory.
-    /// `Ok(false)` when the id is unknown. Returns `Err` (and keeps the note
-    /// in memory, matching what is still on disk) when removal fails.
+    /// Moves the note file to the app trash (same filesystem `rename`, so
+    /// dates are preserved) and drops it from memory.
+    /// `Ok(false)` when the id is unknown. On move failure the note is kept
+    /// in memory and `Err` is returned.
     pub fn delete_note(&mut self, id: &str) -> std::io::Result<bool> {
         if let Some(idx) = self.notes.iter().position(|n| n.id == id) {
-            let path = self.notes[idx].filepath.clone();
-            fs::remove_file(&path)?;
-            self.notes.remove(idx);
+            let note = self.notes.remove(idx);
+            let moved = (|| -> std::io::Result<()> {
+                let trash = self.ensure_trash_dir()?;
+                let target = unique_path(&trash, &note_filename(&note));
+                fs::rename(&note.filepath, &target)?;
+                Ok(())
+            })();
+            if let Err(e) = moved {
+                self.notes.push(note);
+                self.notes.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+                return Err(e);
+            }
             Ok(true)
         } else {
             Ok(false)
         }
+    }
+
+    /// Trashed notes, newest-modified first. Never touches `self.notes`.
+    pub fn trash_notes(&self) -> Vec<Note> {
+        let mut out = Vec::new();
+        if let Ok(entries) = fs::read_dir(self.trash_dir()) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && is_note_file(&path) {
+                    if let Ok(note) = Note::from_file(&path) {
+                        out.push(note);
+                    }
+                }
+            }
+        }
+        out.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+        out
+    }
+
+    /// Moves a trashed note back to the notes dir. When its name was retaken
+    /// meanwhile, the restored note gets a disambiguated id (timestamp-based,
+    /// like creation) instead of overwriting.
+    /// `Ok(None)` when the id is not in the trash.
+    pub fn restore_note(&mut self, id: &str) -> std::io::Result<Option<Note>> {
+        let trashed = self.trash_notes();
+        let Some(entry) = trashed.iter().find(|n| n.id == id) else {
+            return Ok(None);
+        };
+        let file_name = note_filename(entry);
+        let mut target = self.notes_dir.join(&file_name);
+        if target.exists() || self.notes.iter().any(|n| n.id == entry.id) {
+            let mut candidate = timestamp_title_with_seconds();
+            let mut counter = 1u32;
+            while self.note_title_exists(&candidate) {
+                candidate = format!("{}-{}", timestamp_title_with_seconds(), counter);
+                counter += 1;
+            }
+            target = self
+                .notes_dir
+                .join(format!("{}.{}", candidate, self.default_extension));
+        }
+        fs::rename(&entry.filepath, &target)?;
+        let note = Note::from_file(&target)?;
+        self.notes.push(note.clone());
+        self.notes.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
+        Ok(Some(note))
+    }
+
+    /// Permanently deletes one trashed note. `Ok(false)` when unknown.
+    pub fn purge_note(&mut self, id: &str) -> std::io::Result<bool> {
+        let trashed = self.trash_notes();
+        if let Some(entry) = trashed.iter().find(|n| n.id == id) {
+            fs::remove_file(&entry.filepath)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Permanently deletes everything in the trash. Returns the purged count.
+    /// Stops at the first failure, reporting `Err` (earlier purges stand).
+    pub fn empty_trash(&mut self) -> std::io::Result<u64> {
+        let mut count = 0u64;
+        for entry in self.trash_notes() {
+            fs::remove_file(&entry.filepath)?;
+            count += 1;
+        }
+        Ok(count)
+    }
+
+    fn trash_dir(&self) -> PathBuf {
+        self.notes_dir.join(TRASH_DIR_NAME)
+    }
+
+    fn ensure_trash_dir(&self) -> std::io::Result<PathBuf> {
+        let dir = self.trash_dir();
+        fs::create_dir_all(&dir)?;
+        Ok(dir)
     }
 
     /// Overwrites the note file when content changed, then re-sorts newest-first.
@@ -122,6 +213,45 @@ impl StorageManager {
         };
         self.notes.sort_by(|a, b| b.modified_at.cmp(&a.modified_at));
         outcome
+    }
+}
+
+/// Case-sensitive format filter shared by `reload` and `trash_notes`
+/// (contract rule 2): exactly `md`, `txt` or `markdown`.
+fn is_note_file(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some("md" | "txt" | "markdown")
+    )
+}
+
+/// File name (`<stem>.<ext>`) of a note on disk.
+fn note_filename(note: &Note) -> String {
+    note.filepath
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("{}.md", note.id))
+}
+
+/// `dir/file_name`, or `dir/<stem>-trash-<n>.<ext>` while taken, so a move
+/// never overwrites an existing file.
+fn unique_path(dir: &std::path::Path, file_name: &str) -> PathBuf {
+    let mut target = dir.join(file_name);
+    if !target.exists() {
+        return target;
+    }
+    let (stem, ext) = match file_name.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{e}")),
+        None => (file_name.to_string(), String::new()),
+    };
+    let mut counter = 2u32;
+    loop {
+        target = dir.join(format!("{stem}-trash-{counter}{ext}"));
+        if !target.exists() {
+            return target;
+        }
+        counter += 1;
     }
 }
 
@@ -327,12 +457,92 @@ mod tests {
         // In-memory content is kept (the caller's edits are preserved).
         assert_eq!(storage.get_note("victim").unwrap().content, "updated");
 
-        storage.delete_note("victim").unwrap_err();
+        // Delete: notes_dir points at a file, so the trash cannot be created.
+        let dir3 = temp_notes_dir();
+        let blocker3 = write_file(&dir3, "blocker.md", "x");
+        let mut storage3 = test_storage(&blocker3);
+        let mut ghost = Note::new(&blocker3, "ghost", "md");
+        ghost.content = "data".to_string();
+        storage3.notes.push(ghost);
+        storage3.delete_note("ghost").unwrap_err();
         // The note stays listed, matching what is still on disk.
-        assert!(storage.get_note("victim").is_some());
+        assert!(storage3.get_note("ghost").is_some());
 
         fs::remove_dir(&dir2.join("victim.md")).ok();
         fs::remove_dir_all(&dir).ok();
         fs::remove_dir_all(&dir2).ok();
+        fs::remove_dir_all(&dir3).ok();
+    }
+
+    #[test]
+    fn delete_moves_to_trash_and_restore_roundtrips() {
+        let dir = temp_notes_dir();
+        write_file(&dir, "a.md", "hello #x");
+        let mut storage = test_storage(&dir);
+        storage.reload();
+
+        assert!(storage.delete_note("a").unwrap());
+        assert!(storage.notes.is_empty());
+        assert!(!dir.join("a.md").exists());
+
+        let trash = storage.trash_notes();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].id, "a");
+        assert_eq!(trash[0].content, "hello #x");
+        assert_eq!(trash[0].tags, vec!["x"]);
+
+        let restored = storage.restore_note("a").unwrap().unwrap();
+        assert_eq!(restored.id, "a");
+        assert_eq!(storage.notes.len(), 1);
+        assert!(storage.trash_notes().is_empty());
+        assert!(dir.join("a.md").exists());
+
+        assert!(storage.restore_note("ghost").unwrap().is_none());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn restore_disambiguates_when_name_retaken() {
+        let dir = temp_notes_dir();
+        write_file(&dir, "a.md", "original");
+        let mut storage = test_storage(&dir);
+        storage.reload();
+        assert!(storage.delete_note("a").unwrap());
+
+        // Meanwhile the name is taken by a brand-new note.
+        write_file(&dir, "a.md", "replacement");
+        storage.reload();
+        assert_eq!(storage.notes.len(), 1);
+
+        let restored = storage.restore_note("a").unwrap().unwrap();
+        assert_ne!(restored.id, "a");
+        assert_eq!(restored.content, "original");
+        assert_eq!(storage.notes.len(), 2);
+        assert!(storage.trash_notes().is_empty());
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn purge_and_empty_trash() {
+        let dir = temp_notes_dir();
+        write_file(&dir, "a.md", "a");
+        write_file(&dir, "b.md", "b");
+        let mut storage = test_storage(&dir);
+        storage.reload();
+        assert!(storage.delete_note("a").unwrap());
+        assert!(storage.delete_note("b").unwrap());
+        assert_eq!(storage.trash_notes().len(), 2);
+
+        assert!(storage.purge_note("a").unwrap());
+        assert!(!storage.purge_note("a").unwrap());
+        assert_eq!(storage.trash_notes().len(), 1);
+
+        assert_eq!(storage.empty_trash().unwrap(), 1);
+        assert!(storage.trash_notes().is_empty());
+        assert_eq!(storage.empty_trash().unwrap(), 0);
+
+        fs::remove_dir_all(&dir).ok();
     }
 }
