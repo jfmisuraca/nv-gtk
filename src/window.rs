@@ -5,8 +5,8 @@ use gtk4::gdk::{self, Key};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, Button, EventControllerKey, Label, ListBox, ListBoxRow, Orientation,
-    Overlay, Paned, ScrolledWindow, SearchEntry, SelectionMode, TextView, Window,
+    Align, Box as GtkBox, Button, Entry, EventControllerKey, Label, ListBox, ListBoxRow,
+    Orientation, Overlay, Paned, ScrolledWindow, SearchEntry, SelectionMode, TextView, Window,
 };
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
@@ -842,6 +842,77 @@ pub fn build_ui(app: &Application) -> UiHandles {    let config = Config::load()
         }
     };
 
+    // Rename Note dialog: type the new title — Ctrl+R
+    let rename_current_note = {
+        let state = Rc::clone(&state);
+        let window = window.clone();
+        let update_search = update_search.clone();
+        let flush_pending_save = flush_pending_save.clone();
+        let select_note_by_id = select_note_by_id.clone();
+
+        move || {
+            let current_id: Option<String> = state.borrow().current_note_id.clone();
+            let Some(id) = current_id else {
+                return;
+            };
+            flush_pending_save();
+
+            let dialog = Window::builder()
+                .transient_for(&window)
+                .modal(true)
+                .title("Renombrar nota")
+                .default_width(360)
+                .build();
+            let vbox = GtkBox::new(Orientation::Vertical, 8);
+            vbox.set_margin_top(12);
+            vbox.set_margin_bottom(12);
+            vbox.set_margin_start(12);
+            vbox.set_margin_end(12);
+            dialog.set_child(Some(&vbox));
+            let entry = Entry::builder().text(&id).build();
+            entry.select_region(0, -1);
+            vbox.append(&entry);
+            let buttons = GtkBox::new(Orientation::Horizontal, 6);
+            buttons.set_halign(Align::End);
+            let ok_btn = Button::with_label("Renombrar");
+            let cancel_btn = Button::with_label("Cancelar");
+            buttons.append(&cancel_btn);
+            buttons.append(&ok_btn);
+            vbox.append(&buttons);
+
+            let accept = {
+                let state = Rc::clone(&state);
+                let entry = entry.clone();
+                let dialog = dialog.clone();
+                let update_search = update_search.clone();
+                let select_note_by_id = select_note_by_id.clone();
+                move || {
+                    let new_title = entry.text().to_string();
+                    let new_id: Option<String> = {
+                        let mut st = state.borrow_mut();
+                        match st.storage.rename_note(&id, &new_title) {
+                            Ok(Some(note)) => Some(note.id.clone()),
+                            _ => None,
+                        }
+                    };
+                    update_search();
+                    if let Some(new_id) = new_id {
+                        select_note_by_id(&new_id);
+                    }
+                    dialog.close();
+                }
+            };
+            let accept_c = accept.clone();
+            ok_btn.connect_clicked(move |_| accept());
+            entry.connect_activate(move |_| accept_c());
+            let dialog_c = dialog.clone();
+            cancel_btn.connect_clicked(move |_| dialog_c.close());
+
+            dialog.present();
+            entry.grab_focus();
+        }
+    };
+
     // Papelera: diálogo con las notas borradas (restaurar / eliminar
     // definitivo por fila + vaciar). Se abre con Ctrl+T.
     let open_trash_dialog = {
@@ -963,7 +1034,7 @@ pub fn build_ui(app: &Application) -> UiHandles {    let config = Config::load()
         }
     };
 
-    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+T, Ctrl+J, Ctrl+K)
+    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+T, Ctrl+R, Ctrl+J, Ctrl+K)
     let key_controller = EventControllerKey::new();
     key_controller.connect_key_pressed({
         let search_entry = search_entry.clone();
@@ -975,6 +1046,7 @@ pub fn build_ui(app: &Application) -> UiHandles {    let config = Config::load()
         let create_new_empty_note = create_new_empty_note.clone();
         let delete_current_note = delete_current_note.clone();
         let open_trash_dialog = open_trash_dialog.clone();
+        let rename_current_note = rename_current_note.clone();
         let move_list_selection = move_list_selection.clone();
 
         move |_, key, _, modifier| {
@@ -1009,6 +1081,10 @@ pub fn build_ui(app: &Application) -> UiHandles {    let config = Config::load()
                 }
                 Key::t if is_ctrl => {
                     open_trash_dialog();
+                    glib::Propagation::Stop
+                }
+                Key::r if is_ctrl => {
+                    rename_current_note();
                     glib::Propagation::Stop
                 }
                 Key::Escape => {

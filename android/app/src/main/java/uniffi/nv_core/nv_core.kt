@@ -687,6 +687,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_nv_core_checksum_method_nvstorage_purge_note(
     ): Int
+    external fun uniffi_nv_core_checksum_method_nvstorage_rename_note(
+    ): Int
     external fun uniffi_nv_core_checksum_method_nvstorage_restore_note(
     ): Int
     external fun uniffi_nv_core_checksum_method_nvstorage_save_note(
@@ -733,6 +735,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_nv_core_fn_method_nvstorage_purge_note(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Byte
+    external fun uniffi_nv_core_fn_method_nvstorage_rename_note(`ptr`: Long,`id`: RustBuffer.ByValue,`newTitle`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_nv_core_fn_method_nvstorage_restore_note(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_nv_core_fn_method_nvstorage_save_note(`ptr`: Long,`id`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -877,6 +881,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_nv_core_checksum_method_nvstorage_purge_note() and 0xFFFF) != 22860) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_rename_note() and 0xFFFF) != 34945) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_nv_core_checksum_method_nvstorage_restore_note() and 0xFFFF) != 34836) {
@@ -1313,6 +1320,13 @@ public interface NvStorageInterface {
     fun `purgeNote`(`id`: kotlin.String): kotlin.Boolean
     
     /**
+     * Rename a note (new filename stem, contract rule 10); `NotFound`
+     * when the id is unknown. The snapshot may carry a disambiguated id
+     * when the requested name was taken.
+     */
+    fun `renameNote`(`id`: kotlin.String, `newTitle`: kotlin.String): NoteSnapshot
+    
+    /**
      * Restore a trashed note; `NotFound` when the id is not in the trash.
      * The restored snapshot may carry a disambiguated id when its name was
      * retaken meanwhile (contract rule 9).
@@ -1556,6 +1570,27 @@ open class NvStorage: Disposable, AutoCloseable, NvStorageInterface
         it,
         
         FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Rename a note (new filename stem, contract rule 10); `NotFound`
+     * when the id is unknown. The snapshot may carry a disambiguated id
+     * when the requested name was taken.
+     */
+    @Throws(NvException::class)override fun `renameNote`(`id`: kotlin.String, `newTitle`: kotlin.String): NoteSnapshot {
+            return FfiConverterTypeNoteSnapshot.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NvException) { _status ->
+    UniffiLib.uniffi_nv_core_fn_method_nvstorage_rename_note(
+        it,
+        
+        FfiConverterString.lower(`id`),
+        FfiConverterString.lower(`newTitle`),_status)
 }
     }
     )
