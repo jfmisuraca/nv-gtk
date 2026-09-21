@@ -6,10 +6,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -47,6 +49,7 @@ import uniffi.nv_core.NoteSnapshot
 fun TrashScreen(
     trash: List<NoteSnapshot>,
     error: String?,
+    windowSizeClass: WindowSizeClass,
     onBack: () -> Unit,
     onRestore: (String) -> Unit,
     onPurge: (String) -> Unit,
@@ -62,6 +65,7 @@ fun TrashScreen(
     if (opened != null) {
         TrashNoteDetail(
             note = opened,
+            windowSizeClass = windowSizeClass,
             onBack = { openedId = null },
             onRestore = { onRestore(opened.id); openedId = null },
             onPurge = { onPurge(opened.id); openedId = null }
@@ -128,41 +132,52 @@ fun TrashScreen(
             )
         }
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            if (error != null) {
-                Text(
-                    error,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(8.dp)
-                )
-            }
-            if (trash.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Papelera vacía")
+        // T2: same max-width treatment as the list/editor on expanded windows.
+        Box(
+            Modifier.padding(padding).fillMaxSize(),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = windowSizeClass.contentMaxWidth)
+                    .fillMaxHeight()
+            ) {
+                if (error != null) {
+                    Text(
+                        error,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(8.dp)
+                    )
                 }
-            } else {
-                LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
-                    items(trash, key = { it.id }) { note ->
-                        ElevatedCard(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clickable { openedId = note.id }
-                        ) {
-                            Row(
-                                Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
+                if (trash.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Papelera vacía")
+                    }
+                } else {
+                    LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
+                        items(trash, key = { it.id }) { note ->
+                            ElevatedCard(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .clickable { openedId = note.id }
                             ) {
-                                Text(
-                                    note.title,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                TextButton(onClick = { onRestore(note.id) }) {
-                                    Text("Restaurar")
-                                }
-                                IconButton(onClick = { pendingPurge = note }) {
-                                    Icon(Icons.Filled.Delete, contentDescription = "Eliminar")
+                                Row(
+                                    Modifier.padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        note.title,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    TextButton(onClick = { onRestore(note.id) }) {
+                                        Text("Restaurar")
+                                    }
+                                    IconButton(onClick = { pendingPurge = note }) {
+                                        Icon(Icons.Filled.Delete, contentDescription = "Eliminar")
+                                    }
                                 }
                             }
                         }
@@ -181,6 +196,7 @@ fun TrashScreen(
 @Composable
 private fun TrashNoteDetail(
     note: NoteSnapshot,
+    windowSizeClass: WindowSizeClass,
     onBack: () -> Unit,
     onRestore: () -> Unit,
     onPurge: () -> Unit
@@ -227,25 +243,31 @@ private fun TrashNoteDetail(
             )
         }
     ) { padding ->
-        Column(
-            Modifier
-                .padding(padding)
-                .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(12.dp)
+        Box(
+            Modifier.padding(padding).fillMaxSize(),
+            contentAlignment = Alignment.TopCenter
         ) {
-            SelectionContainer {
-                Text(
-                    note.content.ifBlank { "(sin contenido)" },
-                    style = MaterialTheme.typography.bodyLarge
-                )
-            }
-            if (note.tags.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
-                Text(
-                    note.tags.joinToString(" ") { "#$it" },
-                    style = MaterialTheme.typography.labelLarge
-                )
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = windowSizeClass.contentMaxWidth)
+                    .fillMaxHeight()
+                    .verticalScroll(rememberScrollState())
+                    .padding(12.dp)
+            ) {
+                SelectionContainer {
+                    Text(
+                        note.content.ifBlank { "(sin contenido)" },
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
+                if (note.tags.isNotEmpty()) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        note.tags.joinToString(" ") { "#$it" },
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
             }
         }
     }

@@ -4,10 +4,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -41,7 +43,8 @@ fun NotesListScreen(
     onOpen: (String) -> Unit,
     onQueryChange: (String) -> Unit,
     onTrash: () -> Unit,
-    onCreate: () -> Unit
+    onCreate: () -> Unit,
+    windowSizeClass: WindowSizeClass
 ) {
     Scaffold(
         topBar = {
@@ -60,8 +63,20 @@ fun NotesListScreen(
             }
         }
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            OutlinedTextField(
+        // T2: cap content width on expanded windows (large screens read a
+        // centered 720dp column); no-op on compact/medium. Scaffold's default
+        // contentWindowInsets keeps content clear of the system bars.
+        Box(
+            Modifier.padding(padding).fillMaxSize(),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = windowSizeClass.contentMaxWidth)
+                    .fillMaxHeight()
+            ) {
+                OutlinedTextField(
                 value = query,
                 onValueChange = onQueryChange,
                 modifier = Modifier.fillMaxWidth().padding(8.dp),
@@ -124,6 +139,7 @@ fun NotesListScreen(
                         }
                     }
                 }
+            }
             }
         }
     }

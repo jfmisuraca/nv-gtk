@@ -4,6 +4,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -18,7 +19,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -33,6 +37,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // T2: draw edge-to-edge; Scaffolds consume system bars via their default
+        // contentWindowInsets (systemBarsForVisualComponents).
+        enableEdgeToEdge()
         val notesDir = File(filesDir, "notes").apply { mkdirs() }
         storage = NvStorage.open(notesDir.absolutePath)
         setContent {
@@ -68,6 +75,9 @@ class MainActivity : ComponentActivity() {
  */
 @Composable
 private fun NvApp(storage: NvStorage) {
+    // T2: width size class, computed once per configuration change (recomposes
+    // on rotation/split-screen) and passed down for adaptive layout decisions.
+    val windowSizeClass = WindowSizeClass.fromWidth(LocalConfiguration.current.screenWidthDp)
     val scope = rememberCoroutineScope()
     var notes by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
     var trash by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
@@ -127,6 +137,7 @@ private fun NvApp(storage: NvStorage) {
         showTrash -> TrashScreen(
             trash = trash,
             error = error,
+            windowSizeClass = windowSizeClass,
             onBack = { showTrash = false },
             onRestore = { id -> ioOp { storage.restoreNote(id) } },
             onPurge = { id -> ioOp { storage.purgeNote(id) } },
@@ -137,6 +148,7 @@ private fun NvApp(storage: NvStorage) {
             filtering = results != null,
             query = query,
             error = error,
+            windowSizeClass = windowSizeClass,
             onOpen = { selectedId = it },
             onQueryChange = { query = it },
             onTrash = { showTrash = true },
@@ -157,8 +169,32 @@ private fun NvApp(storage: NvStorage) {
         else -> NoteEditorScreen(
             note = selected,
             storage = storage,
+            windowSizeClass = windowSizeClass,
             onDone = { selectedId = null; refresh() },
             onRenamed = { renamed -> selectedId = renamed.id; refresh() }
         )
     }
 }
+
+/**
+ * T2: window width size class with the Material 3 cutoffs
+ * (compact < 600dp, medium < 840dp, expanded >= 840dp).
+ * Self-implemented: the BOM's material3-adaptive 1.2.0 no longer ships
+ * `androidx.compose.material3.adaptive.WindowSizeClass` (the API moved to
+ * androidx.window DpSizeClass buckets), so we keep it dependency-free.
+ */
+enum class WindowSizeClass {
+    Compact, Medium, Expanded;
+
+    companion object {
+        fun fromWidth(widthDp: Int): WindowSizeClass = when {
+            widthDp < 600 -> Compact
+            widthDp < 840 -> Medium
+            else -> Expanded
+        }
+    }
+}
+
+/** T2: readable content width cap on expanded windows; no cap elsewhere. */
+internal val WindowSizeClass.contentMaxWidth: Dp
+    get() = if (this == WindowSizeClass.Expanded) 720.dp else Dp.Unspecified
