@@ -33,10 +33,10 @@ retoque del diálogo ("Borrar nota NOMBRE-NOTA?", sin "para siempre").
 - TDD: off.
 
 ## Checklist
-- [ ] T1: core + tests + spec regla 9.
-- [ ] T2: desktop (Ctrl+D a papelera + diálogo Ctrl+T).
-- [ ] T3: FFI + bindings + móvil (diálogo + pantalla papelera).
-- [ ] T4: verificar todo, commits por área, instalar en celu.
+- [x] T1: core + tests + spec regla 9.
+- [x] T2: desktop (Ctrl+D a papelera + diálogo Ctrl+T).
+- [x] T3: FFI + bindings + móvil (diálogo + pantalla papelera).
+- [x] T4: verificar todo, commits por área, instalar en celu.
 
 ## Authorized scope
 Pedido del usuario ("implementes una papelera, tanto en movil como desktop").
@@ -50,7 +50,15 @@ Merge/push: usuario.
 - `cargo test -p nv_core`, suite desktop xvfb, `:app:assembleDebug`.
 
 ## Verification evidence
-- (to fill)
+- Core: `cargo test -p nv_core` 26/26 (3 trash tests + reworked io test).
+- Desktop: suite xvfb 2/2 + 26/26; `cargo check` limpio (un `Rc::new_cyclic`
+  con `dyn` no compila — se resolvió con función libre `rebuild_trash_rows`).
+- FFI: `cargo build` + bindgen regen OK (`listTrash/restoreNote/purgeNote/
+  emptyTrash` presentes); test `trash_roundtrip_through_ffi_object` verde.
+- Móvil: `assembleDebug` verde (`RestoreFromTrash` no está en icons-core →
+  botón de texto "Restaurar"); instalado por adb wireless, 29 notas intactas
+  (el usuario había borrado 1 probando el build anterior, pre-papelera).
+- Commits: `74c7660` core+spec, `15202cd` desktop, `109046d` ffi+móvil.
 
 ## Progress
 - Branch `feature/trash` apilada sobre `feature/android-editor`.
