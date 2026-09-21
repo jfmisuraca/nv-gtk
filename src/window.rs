@@ -76,6 +76,19 @@ fn confirm_dialog(
         dialog_c.close();
         on_confirm();
     });
+    // Keyboard: Enter confirms via the default widget, Esc cancels.
+    dialog.set_default_widget(Some(&ok_btn));
+    let esc_controller = EventControllerKey::new();
+    let dialog_c = dialog.clone();
+    esc_controller.connect_key_pressed(move |_, key, _, _| {
+        if key == Key::Escape {
+            dialog_c.close();
+            glib::Propagation::Stop
+        } else {
+            glib::Propagation::Proceed
+        }
+    });
+    dialog.add_controller(esc_controller);
     dialog.present();
 }
 
@@ -969,6 +982,19 @@ pub fn build_ui(app: &Application) -> UiHandles {    let config = Config::load()
             let dialog_c = dialog.clone();
             cancel_btn.connect_clicked(move |_| dialog_c.close());
 
+            // Keyboard: Enter confirms via the entry, Esc closes.
+            let esc_controller = EventControllerKey::new();
+            let dialog_c = dialog.clone();
+            esc_controller.connect_key_pressed(move |_, key, _, _| {
+                if key == Key::Escape {
+                    dialog_c.close();
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            });
+            dialog.add_controller(esc_controller);
+
             dialog.present();
             entry.grab_focus();
         }
@@ -1063,6 +1089,19 @@ pub fn build_ui(app: &Application) -> UiHandles {    let config = Config::load()
                     dialog_c.close();
                 });
             }
+
+            // Keyboard: Esc closes the trash dialog.
+            let esc_controller = EventControllerKey::new();
+            let dialog_c = dialog.clone();
+            esc_controller.connect_key_pressed(move |_, key, _, _| {
+                if key == Key::Escape {
+                    dialog_c.close();
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            });
+            dialog.add_controller(esc_controller);
 
             refresh();
             dialog.present();
