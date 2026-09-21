@@ -3,6 +3,7 @@
 
     <application
         android:label="nv-gtk"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
         <activity
             android:name=".MainActivity"
