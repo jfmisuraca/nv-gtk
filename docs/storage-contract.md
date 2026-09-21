@@ -121,3 +121,21 @@ it toward the top.
 Observable: creating `"20240919-1530"` three times yields three distinct
 files/ids; saving new content overwrites the same file, updates its mtime
 and tags, and re-sorts the list.
+
+## 9. App trash (not the OS trash)
+
+- Deleted notes are moved to `notes_dir/.trash/` (same-filesystem `rename`,
+  so dates and tags survive), never unlinked
+  (`StorageManager::delete_note`, `nv-core/src/storage.rs`).
+- The trash directory is hidden and never loaded: `reload` only reads files
+  directly inside the notes dir (`is_file` skips the directory).
+- `trash_notes` lists trashed notes newest-first (same format filter as rule 2).
+- `restore_note` moves the file back; when its name was retaken meanwhile,
+  the restored note gets a timestamp-disambiguated id instead of overwriting.
+- `purge_note` unlinks one trashed note; `empty_trash` unlinks all of them
+  and returns the purged count.
+- A move that would overwrite an existing trash file is disambiguated with a
+  `-trash-<n>` suffix instead.
+
+Observable: deleting `a.md` removes it from the list but keeps
+`.trash/a.md`; restoring brings it back; purging or emptying deletes for good.
