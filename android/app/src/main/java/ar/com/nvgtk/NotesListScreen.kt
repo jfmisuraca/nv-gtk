@@ -12,10 +12,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -32,10 +34,20 @@ fun NotesListScreen(
     notes: List<NoteSnapshot>,
     error: String?,
     onOpen: (String) -> Unit,
+    onTrash: () -> Unit,
     onCreate: () -> Unit
 ) {
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Notas") }) },
+        topBar = {
+            TopAppBar(
+                title = { Text("Notas") },
+                actions = {
+                    IconButton(onClick = onTrash) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Papelera")
+                    }
+                }
+            )
+        },
         floatingActionButton = {
             FloatingActionButton(onClick = onCreate) {
                 Icon(Icons.Filled.Add, contentDescription = "Nueva nota")

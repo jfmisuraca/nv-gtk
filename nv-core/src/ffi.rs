@@ -167,10 +167,37 @@ impl NvStorage {
         }
     }
 
-    /// Delete by id; `Ok(false)` when the id is unknown (mirrors desktop).
-    /// `Err(NvError::Io)` when the file cannot be removed.
+    /// Delete moves the note to the app trash (contract rule 9);
+    /// `Ok(false)` when the id is unknown (mirrors desktop).
+    /// `Err(NvError::Io)` when the file cannot be moved.
     pub fn delete_note(&self, id: String) -> Result<bool, NvError> {
         self.lock().delete_note(&id).map_err(NvError::from)
+    }
+
+    /// Trashed notes, newest-modified first (contract rule 9).
+    pub fn list_trash(&self) -> Vec<NoteSnapshot> {
+        self.lock().trash_notes().iter().map(snapshot_of).collect()
+    }
+
+    /// Restore a trashed note; `NotFound` when the id is not in the trash.
+    /// The restored snapshot may carry a disambiguated id when its name was
+    /// retaken meanwhile (contract rule 9).
+    pub fn restore_note(&self, id: String) -> Result<NoteSnapshot, NvError> {
+        self.lock()
+            .restore_note(&id)
+            .map_err(NvError::from)?
+            .map(|note| snapshot_of(&note))
+            .ok_or(NvError::NotFound(id))
+    }
+
+    /// Permanently delete one trashed note; `Ok(false)` when unknown.
+    pub fn purge_note(&self, id: String) -> Result<bool, NvError> {
+        self.lock().purge_note(&id).map_err(NvError::from)
+    }
+
+    /// Permanently delete everything in the trash. Returns the purged count.
+    pub fn empty_trash(&self) -> Result<u64, NvError> {
+        self.lock().empty_trash().map_err(NvError::from)
     }
 }
 
@@ -302,6 +329,41 @@ mod tests {
             Err(NvError::Io(_))
         ));
         fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn trash_roundtrip_through_ffi_object() {
+        let dir = temp_dir("trash");
+        fs::write(dir.join("gone.md"), "bye #adios").unwrap();
+        let storage = NvStorage::open(dir.to_string_lossy().into()).unwrap();
+
+        assert!(storage.delete_note("gone".to_string()).unwrap());
+        assert!(storage.get_note("gone".to_string()).is_err());
+        let trash = storage.list_trash();
+        assert_eq!(trash.len(), 1);
+        assert_eq!(trash[0].content, "bye #adios");
+
+        let restored = storage.restore_note("gone".to_string()).unwrap();
+        assert_eq!(restored.id, "gone");
+        assert!(storage.list_trash().is_empty());
+        assert!(storage.restore_note("ghost".to_string()).is_err());
+
+        assert!(storage.delete_note("gone".to_string()).unwrap());
+        assert!(storage.purge_note("gone".to_string()).unwrap());
+        assert!(!storage.purge_note("gone".to_string()).unwrap());
+        assert!(storage.list_trash().is_empty());
+
+        let dir2 = temp_dir("trash-empty");
+        fs::write(dir2.join("x.md"), "x").unwrap();
+        fs::write(dir2.join("y.md"), "y").unwrap();
+        let storage2 = NvStorage::open(dir2.to_string_lossy().into()).unwrap();
+        assert!(storage2.delete_note("x".to_string()).unwrap());
+        assert!(storage2.delete_note("y".to_string()).unwrap());
+        assert_eq!(storage2.empty_trash().unwrap(), 2);
+        assert!(storage2.list_trash().is_empty());
+
+        fs::remove_dir_all(&dir).ok();
+        fs::remove_dir_all(&dir2).ok();
     }
 
     #[test]
