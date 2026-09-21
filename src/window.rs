@@ -36,6 +36,49 @@ pub struct UiHandles {
     pub update_results_visibility: Rc<dyn Fn()>,
 }
 
+/// Small modal confirm dialog: title + body + Cancel/confirm-button.
+/// Runs `on_confirm` only when the user picks the confirm action. Used for
+/// permanent deletions (purge, empty trash); moving to trash needs none.
+fn confirm_dialog(
+    parent: &Window,
+    title: &str,
+    body: &str,
+    confirm_label: &str,
+    on_confirm: impl Fn() + 'static,
+) {
+    let dialog = Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .title(title)
+        .default_width(340)
+        .build();
+    let vbox = GtkBox::new(Orientation::Vertical, 8);
+    vbox.set_margin_top(12);
+    vbox.set_margin_bottom(12);
+    vbox.set_margin_start(12);
+    vbox.set_margin_end(12);
+    dialog.set_child(Some(&vbox));
+    let label = Label::new(Some(body));
+    label.set_wrap(true);
+    vbox.append(&label);
+    let buttons = GtkBox::new(Orientation::Horizontal, 6);
+    buttons.set_halign(Align::End);
+    let cancel_btn = Button::with_label("Cancelar");
+    let ok_btn = Button::with_label(confirm_label);
+    buttons.append(&cancel_btn);
+    buttons.append(&ok_btn);
+    vbox.append(&buttons);
+
+    let dialog_c = dialog.clone();
+    cancel_btn.connect_clicked(move |_| dialog_c.close());
+    let dialog_c = dialog.clone();
+    ok_btn.connect_clicked(move |_| {
+        dialog_c.close();
+        on_confirm();
+    });
+    dialog.present();
+}
+
 /// Rebuilds the trash dialog rows from `trash_notes`, wiring per-row
 /// restore/purge buttons that sync the main list (`update_search`) and then
 /// rebuild themselves. Free function (not a closure) so row handlers can
@@ -44,6 +87,7 @@ fn rebuild_trash_rows(
     list: &ListBox,
     state: &Rc<RefCell<AppState>>,
     update_search: &Rc<dyn Fn()>,
+    parent: &Window,
 ) {
     while let Some(row) = list.first_child() {
         list.remove(&row);
@@ -73,6 +117,7 @@ fn rebuild_trash_rows(
         let list_c = list.clone();
         let state_c = Rc::clone(state);
         let update_search_c = Rc::clone(update_search);
+        let parent_c = parent.clone();
         let id_c = id.clone();
         restore_btn.connect_clicked(move |_| {
             {
@@ -80,20 +125,36 @@ fn rebuild_trash_rows(
                 let _ = st.storage.restore_note(&id_c);
             }
             update_search_c();
-            rebuild_trash_rows(&list_c, &state_c, &update_search_c);
+            rebuild_trash_rows(&list_c, &state_c, &update_search_c, &parent_c);
         });
 
         let list_c = list.clone();
         let state_c = Rc::clone(state);
         let update_search_c = Rc::clone(update_search);
+        let parent_c = parent.clone();
         let id_c = id.clone();
+        let title_c = title.clone();
         purge_btn.connect_clicked(move |_| {
-            {
-                let mut st = state_c.borrow_mut();
-                let _ = st.storage.purge_note(&id_c);
-            }
-            update_search_c();
-            rebuild_trash_rows(&list_c, &state_c, &update_search_c);
+            let list_c = list_c.clone();
+            let state_c = Rc::clone(&state_c);
+            let update_search_c = update_search_c.clone();
+            let dialog_parent = parent_c.clone();
+            let confirm_parent = parent_c.clone();
+            let id_c2 = id_c.clone();
+            confirm_dialog(
+                &dialog_parent,
+                "Eliminar definitivamente",
+                &format!("¿Borrar \"{title_c}\" para siempre?"),
+                "Eliminar",
+                move || {
+                    {
+                        let mut st = state_c.borrow_mut();
+                        let _ = st.storage.purge_note(&id_c2);
+                    }
+                    update_search_c();
+                    rebuild_trash_rows(&list_c, &state_c, &update_search_c, &confirm_parent);
+                },
+            );
         });
     }
 }
@@ -947,7 +1008,8 @@ pub fn build_ui(app: &Application) -> UiHandles {    let config = Config::load()
                 let list = list.clone();
                 let state = Rc::clone(&state);
                 let update_search = update_search.clone();
-                move || rebuild_trash_rows(&list, &state, &update_search)
+                let dialog = dialog.clone();
+                move || rebuild_trash_rows(&list, &state, &update_search, &dialog)
             };
 
             let bottom = GtkBox::new(Orientation::Horizontal, 6);
@@ -962,15 +1024,37 @@ pub fn build_ui(app: &Application) -> UiHandles {    let config = Config::load()
                 let list_c = list.clone();
                 let state_c = Rc::clone(&state);
                 let update_search_c = update_search.clone();
-                let refresh_c = refresh.clone();
+                let dialog_c = dialog.clone();
                 empty_btn.connect_clicked(move |_| {
-                    {
-                        let mut st = state_c.borrow_mut();
-                        let _ = st.storage.empty_trash();
+                    let trashed_count = state_c.borrow().storage.trash_notes().len();
+                    if trashed_count == 0 {
+                        return;
                     }
-                    update_search_c();
-                    rebuild_trash_rows(&list_c, &state_c, &update_search_c);
-                    refresh_c();
+                    let list_c = list_c.clone();
+                    let state_c = Rc::clone(&state_c);
+                    let update_search_c = update_search_c.clone();
+                    let dialog_c2 = dialog_c.clone();
+                    confirm_dialog(
+                        &dialog_c,
+                        "Vaciar papelera",
+                        &format!(
+                            "¿Eliminar para siempre las {trashed_count} notas de la papelera?"
+                        ),
+                        "Vaciar",
+                        move || {
+                            {
+                                let mut st = state_c.borrow_mut();
+                                let _ = st.storage.empty_trash();
+                            }
+                            update_search_c();
+                            rebuild_trash_rows(
+                                &list_c,
+                                &state_c,
+                                &update_search_c,
+                                &dialog_c2,
+                            );
+                        },
+                    );
                 });
             }
             {
