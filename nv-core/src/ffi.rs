@@ -174,6 +174,17 @@ impl NvStorage {
         self.lock().delete_note(&id).map_err(NvError::from)
     }
 
+    /// Rename a note (new filename stem, contract rule 10); `NotFound`
+    /// when the id is unknown. The snapshot may carry a disambiguated id
+    /// when the requested name was taken.
+    pub fn rename_note(&self, id: String, new_title: String) -> Result<NoteSnapshot, NvError> {
+        self.lock()
+            .rename_note(&id, &new_title)
+            .map_err(NvError::from)?
+            .map(|note| snapshot_of(&note))
+            .ok_or(NvError::NotFound(id))
+    }
+
     /// Trashed notes, newest-modified first (contract rule 9).
     pub fn list_trash(&self) -> Vec<NoteSnapshot> {
         self.lock().trash_notes().iter().map(snapshot_of).collect()
@@ -328,6 +339,25 @@ mod tests {
             NvStorage::open(file.to_string_lossy().into()),
             Err(NvError::Io(_))
         ));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn rename_roundtrip_through_ffi_object() {
+        let dir = temp_dir("rename");
+        fs::write(dir.join("old.md"), "text #tag").unwrap();
+        let storage = NvStorage::open(dir.to_string_lossy().into()).unwrap();
+
+        let renamed = storage
+            .rename_note("old".to_string(), "new".to_string())
+            .unwrap();
+        assert_eq!(renamed.id, "new");
+        assert_eq!(renamed.content, "text #tag");
+        assert_eq!(renamed.tags, vec!["tag"]);
+        assert!(storage.get_note("old".to_string()).is_err());
+        assert_eq!(storage.list_notes().len(), 1);
+
+        assert!(storage.rename_note("ghost".to_string(), "x".to_string()).is_err());
         fs::remove_dir_all(&dir).ok();
     }
 
