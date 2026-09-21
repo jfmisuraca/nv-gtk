@@ -5,8 +5,8 @@ use gtk4::gdk::{self, Key};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, EventControllerKey, Label, ListBox, ListBoxRow, Orientation, Overlay,
-    Paned, ScrolledWindow, SearchEntry, SelectionMode, TextView,
+    Align, Box as GtkBox, Button, EventControllerKey, Label, ListBox, ListBoxRow, Orientation,
+    Overlay, Paned, ScrolledWindow, SearchEntry, SelectionMode, TextView, Window,
 };
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
@@ -36,8 +36,69 @@ pub struct UiHandles {
     pub update_results_visibility: Rc<dyn Fn()>,
 }
 
-pub fn build_ui(app: &Application) -> UiHandles {
-    let config = Config::load();
+/// Rebuilds the trash dialog rows from `trash_notes`, wiring per-row
+/// restore/purge buttons that sync the main list (`update_search`) and then
+/// rebuild themselves. Free function (not a closure) so row handlers can
+/// re-enter it without reference cycles.
+fn rebuild_trash_rows(
+    list: &ListBox,
+    state: &Rc<RefCell<AppState>>,
+    update_search: &Rc<dyn Fn()>,
+) {
+    while let Some(row) = list.first_child() {
+        list.remove(&row);
+    }
+    let trashed: Vec<(String, String)> = {
+        let st = state.borrow();
+        st.storage
+            .trash_notes()
+            .iter()
+            .map(|n| (n.id.clone(), n.title.clone()))
+            .collect()
+    };
+    for (id, title) in trashed {
+        let row = ListBoxRow::new();
+        let hbox = GtkBox::new(Orientation::Horizontal, 6);
+        let label = Label::new(Some(&title));
+        label.set_halign(Align::Start);
+        label.set_hexpand(true);
+        let restore_btn = Button::with_label("Restaurar");
+        let purge_btn = Button::with_label("Eliminar");
+        hbox.append(&label);
+        hbox.append(&restore_btn);
+        hbox.append(&purge_btn);
+        row.set_child(Some(&hbox));
+        list.append(&row);
+
+        let list_c = list.clone();
+        let state_c = Rc::clone(state);
+        let update_search_c = Rc::clone(update_search);
+        let id_c = id.clone();
+        restore_btn.connect_clicked(move |_| {
+            {
+                let mut st = state_c.borrow_mut();
+                let _ = st.storage.restore_note(&id_c);
+            }
+            update_search_c();
+            rebuild_trash_rows(&list_c, &state_c, &update_search_c);
+        });
+
+        let list_c = list.clone();
+        let state_c = Rc::clone(state);
+        let update_search_c = Rc::clone(update_search);
+        let id_c = id.clone();
+        purge_btn.connect_clicked(move |_| {
+            {
+                let mut st = state_c.borrow_mut();
+                let _ = st.storage.purge_note(&id_c);
+            }
+            update_search_c();
+            rebuild_trash_rows(&list_c, &state_c, &update_search_c);
+        });
+    }
+}
+
+pub fn build_ui(app: &Application) -> UiHandles {    let config = Config::load();
     let storage = StorageManager::new(&config);
     let initial_filtered: Vec<String> = storage.notes.iter().map(|n| n.id.clone()).collect();
 
@@ -775,9 +836,81 @@ pub fn build_ui(app: &Application) -> UiHandles {
                     drop(st);
                 }
 
-                info_label.set_text("Nota borrada");
+                info_label.set_text("Nota movida a la papelera");
                 text_view.grab_focus();
             }
+        }
+    };
+
+    // Papelera: diálogo con las notas borradas (restaurar / eliminar
+    // definitivo por fila + vaciar). Se abre con Ctrl+T.
+    let open_trash_dialog = {
+        let state = Rc::clone(&state);
+        let window = window.clone();
+        let update_search = update_search.clone();
+
+        move || {
+            let update_search: Rc<dyn Fn()> = Rc::new(update_search.clone());
+            let dialog = Window::builder()
+                .transient_for(&window)
+                .modal(true)
+                .title("Papelera")
+                .default_width(420)
+                .default_height(320)
+                .build();
+
+            let vbox = GtkBox::new(Orientation::Vertical, 6);
+            vbox.set_margin_top(12);
+            vbox.set_margin_bottom(12);
+            vbox.set_margin_start(12);
+            vbox.set_margin_end(12);
+            dialog.set_child(Some(&vbox));
+
+            let scroll = ScrolledWindow::builder().vexpand(true).build();
+            vbox.append(&scroll);
+            let list = ListBox::new();
+            list.set_selection_mode(SelectionMode::None);
+            scroll.set_child(Some(&list));
+
+            let refresh = {
+                let list = list.clone();
+                let state = Rc::clone(&state);
+                let update_search = update_search.clone();
+                move || rebuild_trash_rows(&list, &state, &update_search)
+            };
+
+            let bottom = GtkBox::new(Orientation::Horizontal, 6);
+            bottom.set_halign(Align::End);
+            let empty_btn = Button::with_label("Vaciar papelera");
+            let close_btn = Button::with_label("Cerrar");
+            bottom.append(&empty_btn);
+            bottom.append(&close_btn);
+            vbox.append(&bottom);
+
+            {
+                let list_c = list.clone();
+                let state_c = Rc::clone(&state);
+                let update_search_c = update_search.clone();
+                let refresh_c = refresh.clone();
+                empty_btn.connect_clicked(move |_| {
+                    {
+                        let mut st = state_c.borrow_mut();
+                        let _ = st.storage.empty_trash();
+                    }
+                    update_search_c();
+                    rebuild_trash_rows(&list_c, &state_c, &update_search_c);
+                    refresh_c();
+                });
+            }
+            {
+                let dialog_c = dialog.clone();
+                close_btn.connect_clicked(move |_| {
+                    dialog_c.close();
+                });
+            }
+
+            refresh();
+            dialog.present();
         }
     };
 
@@ -830,7 +963,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
         }
     };
 
-    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+J, Ctrl+K)
+    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+T, Ctrl+J, Ctrl+K)
     let key_controller = EventControllerKey::new();
     key_controller.connect_key_pressed({
         let search_entry = search_entry.clone();
@@ -841,6 +974,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
         let set_results_visible = set_results_visible.clone();
         let create_new_empty_note = create_new_empty_note.clone();
         let delete_current_note = delete_current_note.clone();
+        let open_trash_dialog = open_trash_dialog.clone();
         let move_list_selection = move_list_selection.clone();
 
         move |_, key, _, modifier| {
@@ -871,6 +1005,10 @@ pub fn build_ui(app: &Application) -> UiHandles {
                 }
                 Key::d if is_ctrl => {
                     delete_current_note();
+                    glib::Propagation::Stop
+                }
+                Key::t if is_ctrl => {
+                    open_trash_dialog();
                     glib::Propagation::Stop
                 }
                 Key::Escape => {
