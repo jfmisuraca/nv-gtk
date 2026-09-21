@@ -29,11 +29,11 @@ Pedido del usuario ("renombrar notas") tras cerrar papelera y búsqueda.
 - TDD: off.
 
 ## Checklist
-- [ ] T1: core + tests + spec.
-- [ ] T2: FFI + test + bindings.
-- [ ] T3: desktop Ctrl+R.
-- [ ] T4: móvil título editable.
-- [ ] T5: verificar, commits, instalar en celu.
+- [x] T1: core + tests + spec.
+- [x] T2: FFI + test + bindings.
+- [x] T3: desktop Ctrl+R.
+- [x] T4: móvil título editable.
+- [x] T5: verificar, commits, instalar en celu.
 
 ## Authorized scope
 Usuario: "si" al diseño propuesto. Merge/push: usuario.
@@ -46,7 +46,12 @@ Usuario: "si" al diseño propuesto. Merge/push: usuario.
 - `cargo test -p nv_core`, desktop xvfb, `:app:assembleDebug`.
 
 ## Verification evidence
-- (to fill)
+- Core 29/29 (2 rename tests); refactor `note_title_exists` → `title_taken`
+  con exclusión (create/restore migran sin cambios de conducta).
+- Desktop suite verde; `cargo check` limpio.
+- Móvil `assembleDebug` verde; instalado por adb en el celu.
+- Commits: `cb960af` core+spec, `36f6a21` ffi+bindings, `5c10507` desktop,
+  `b520ade` móvil+taskdoc.
 
 ## Progress
 - Branch `feature/rename` from `main@40ed5d6`.
