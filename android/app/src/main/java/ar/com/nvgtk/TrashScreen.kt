@@ -1,14 +1,20 @@
 package ar.com.nvgtk
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -48,8 +54,20 @@ fun TrashScreen(
 ) {
     var pendingPurge by remember { mutableStateOf<NoteSnapshot?>(null) }
     var confirmEmpty by remember { mutableStateOf(false) }
+    var openedId by remember { mutableStateOf<String?>(null) }
 
     BackHandler(onBack = onBack)
+
+    val opened = trash.firstOrNull { it.id == openedId }
+    if (opened != null) {
+        TrashNoteDetail(
+            note = opened,
+            onBack = { openedId = null },
+            onRestore = { onRestore(opened.id); openedId = null },
+            onPurge = { onPurge(opened.id); openedId = null }
+        )
+        return
+    }
 
     if (pendingPurge != null) {
         AlertDialog(
@@ -129,6 +147,7 @@ fun TrashScreen(
                             Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 4.dp)
+                                .clickable { openedId = note.id }
                         ) {
                             Row(
                                 Modifier.padding(12.dp),
@@ -149,6 +168,84 @@ fun TrashScreen(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Read-only preview of a trashed note: full content (selectable) plus
+ * restore / purge actions, so the user can decide its fate.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TrashNoteDetail(
+    note: NoteSnapshot,
+    onBack: () -> Unit,
+    onRestore: () -> Unit,
+    onPurge: () -> Unit
+) {
+    var confirmPurge by remember { mutableStateOf(false) }
+
+    BackHandler(onBack = onBack)
+
+    if (confirmPurge) {
+        AlertDialog(
+            onDismissRequest = { confirmPurge = false },
+            title = { Text("Eliminar definitivamente") },
+            text = { Text("¿Borrar \"${note.title}\" para siempre?") },
+            confirmButton = {
+                TextButton(onClick = { confirmPurge = false; onPurge() }) {
+                    Text("Eliminar")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmPurge = false }) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(note.title) },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Volver")
+                    }
+                },
+                actions = {
+                    TextButton(onClick = onRestore) {
+                        Text("Restaurar")
+                    }
+                    IconButton(onClick = { confirmPurge = true }) {
+                        Icon(Icons.Filled.Delete, contentDescription = "Eliminar")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Column(
+            Modifier
+                .padding(padding)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(12.dp)
+        ) {
+            SelectionContainer {
+                Text(
+                    note.content.ifBlank { "(sin contenido)" },
+                    style = MaterialTheme.typography.bodyLarge
+                )
+            }
+            if (note.tags.isNotEmpty()) {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    note.tags.joinToString(" ") { "#$it" },
+                    style = MaterialTheme.typography.labelLarge
+                )
             }
         }
     }
