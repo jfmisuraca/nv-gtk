@@ -55,6 +55,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation("androidx.compose.material:material-icons-core")
 
     // Required by the UniFFI-generated nv_core bindings (JNA direct mapping).
     implementation("net.java.dev.jna:jna:5.15.0@aar")
