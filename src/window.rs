@@ -12,6 +12,7 @@ use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
 
 use crate::app_state::AppState;
+use crate::theme;
 use crate::wiki_autocomplete::WikiAutocomplete;
 use nv_core::config::Config;
 use nv_core::search::search_notes;
@@ -172,7 +173,13 @@ fn rebuild_trash_rows(
     }
 }
 
-pub fn build_ui(app: &Application) -> UiHandles {    let config = Config::load();
+pub fn build_ui(app: &Application) -> UiHandles {
+    // Apply the Catppuccin theme before building the main window so every
+    // widget picks it up from the start (light -> Latte, dark -> Mocha).
+    if let Some(display) = gtk4::gdk::Display::default() {
+        theme::load(&display);
+    }
+    let config = Config::load();
     let storage = StorageManager::new(&config);
     let initial_filtered: Vec<String> = storage.notes.iter().map(|n| n.id.clone()).collect();
 
