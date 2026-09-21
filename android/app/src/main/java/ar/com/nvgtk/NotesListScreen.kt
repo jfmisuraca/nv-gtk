@@ -12,12 +12,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -32,8 +35,11 @@ import uniffi.nv_core.NoteSnapshot
 @Composable
 fun NotesListScreen(
     notes: List<NoteSnapshot>,
+    filtering: Boolean,
+    query: String,
     error: String?,
     onOpen: (String) -> Unit,
+    onQueryChange: (String) -> Unit,
     onTrash: () -> Unit,
     onCreate: () -> Unit
 ) {
@@ -55,6 +61,28 @@ fun NotesListScreen(
         }
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.fillMaxWidth().padding(8.dp),
+                placeholder = { Text("Buscar…") },
+                leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { onQueryChange("") }) {
+                            Icon(Icons.Filled.Clear, contentDescription = "Limpiar")
+                        }
+                    }
+                },
+                singleLine = true
+            )
+            if (filtering) {
+                Text(
+                    "${notes.size} resultados",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                )
+            }
             if (error != null) {
                 Text(
                     error,
