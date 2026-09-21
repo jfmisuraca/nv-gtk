@@ -1,5 +1,6 @@
 package ar.com.nvgtk
 
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -7,6 +8,8 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -15,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -33,7 +37,16 @@ class MainActivity : ComponentActivity() {
         storage = NvStorage.open(notesDir.absolutePath)
         setContent {
             val darkTheme = isSystemInDarkTheme()
-            MaterialTheme(colorScheme = if (darkTheme) CatppuccinDarkColors else CatppuccinLightColors) {
+            // Dynamic color (wallpaper palette) on Android 12+, Catppuccin fallback below.
+            val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val context = LocalContext.current
+                if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+            } else if (darkTheme) {
+                CatppuccinDarkColors
+            } else {
+                CatppuccinLightColors
+            }
+            MaterialTheme(colorScheme = colorScheme) {
                 Surface(Modifier.fillMaxSize()) {
                     NvApp(storage)
                 }
