@@ -5,3 +5,10 @@ target
 pkg/*
 target/*
 *.pkg.tar.zst
+# Local Pi runtime state
+.atl/
+# Android scaffold: machine-built binaries, caches and local SDK path
+android/**/*.so
+android/.gradle/
+android/**/build/
+android/local.properties
