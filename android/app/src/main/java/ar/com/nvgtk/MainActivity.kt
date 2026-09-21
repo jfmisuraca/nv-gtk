@@ -142,7 +142,8 @@ private fun NvApp(storage: NvStorage) {
         else -> NoteEditorScreen(
             note = selected,
             storage = storage,
-            onDone = { selectedId = null; refresh() }
+            onDone = { selectedId = null; refresh() },
+            onRenamed = { renamed -> selectedId = renamed.id; refresh() }
         )
     }
 }
