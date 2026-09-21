@@ -12,3 +12,5 @@ android/**/*.so
 android/.gradle/
 android/**/build/
 android/local.properties
+# Local OpenCode config dropped in-repo
+config.json
