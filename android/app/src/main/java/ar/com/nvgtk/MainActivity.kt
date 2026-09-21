@@ -3,6 +3,7 @@ package ar.com.nvgtk
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -31,7 +32,8 @@ class MainActivity : ComponentActivity() {
         val notesDir = File(filesDir, "notes").apply { mkdirs() }
         storage = NvStorage.open(notesDir.absolutePath)
         setContent {
-            MaterialTheme {
+            val darkTheme = isSystemInDarkTheme()
+            MaterialTheme(colorScheme = if (darkTheme) CatppuccinDarkColors else CatppuccinLightColors) {
                 Surface(Modifier.fillMaxSize()) {
                     NvApp(storage)
                 }

@@ -1,4 +1,5 @@
 mod app_state;
+mod theme;
 mod wiki_autocomplete;
 mod wiki_link;
 mod window;
