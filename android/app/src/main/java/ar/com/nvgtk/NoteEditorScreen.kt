@@ -2,12 +2,24 @@ package ar.com.nvgtk
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -27,6 +39,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -39,30 +53,34 @@ import uniffi.nv_core.NvStorage
  * the core rename API, which may disambiguate on collisions. Content saves
  * only when changed, on back navigation (button or system gesture).
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
 fun NoteEditorScreen(
     note: NoteSnapshot,
     storage: NvStorage,
+    windowSizeClass: WindowSizeClass,
     onDone: () -> Unit,
     onRenamed: (NoteSnapshot) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    var text by remember(note.id) { mutableStateOf(note.content) }
+    val textFieldState = rememberTextFieldState(initialText = note.content)
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
     var error by remember { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
     var editingTitle by remember { mutableStateOf(false) }
     var titleText by remember(note.id) { mutableStateOf(note.title) }
 
     fun saveIfChanged(next: () -> Unit) {
-        if (text == note.content) {
+        val current = textFieldState.text.toString()
+        if (current == note.content) {
             next()
             return
         }
         saving = true
         scope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching { storage.saveNote(note.id, text) }
+                runCatching { storage.saveNote(note.id, current) }
             }
             saving = false
             result.onFailure { error = it.message }.onSuccess { next() }
@@ -141,20 +159,40 @@ fun NoteEditorScreen(
             )
         }
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().padding(8.dp)) {
-            if (error != null) {
-                Text(
-                    error ?: "",
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(bottom = 8.dp)
+        // T2-fix: Scaffold innerPadding already includes the nav-bar bottom inset.
+        // Stacking `imePadding()` on top of it would float the field above the
+        // keyboard, so the bottom inset is applied conditionally instead.
+        Box(
+            Modifier
+                .padding(
+                    start = padding.calculateLeftPadding(LayoutDirection.Ltr),
+                    top = padding.calculateTopPadding(),
+                    end = padding.calculateRightPadding(LayoutDirection.Ltr)
+                )
+                .fillMaxSize(),
+            contentAlignment = Alignment.TopCenter
+        ) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = windowSizeClass.contentMaxWidth)
+                    .fillMaxHeight()
+                    .then(if (imeBottom > 0) Modifier.imePadding() else Modifier.navigationBarsPadding())
+                    .padding(8.dp)
+            ) {
+                if (error != null) {
+                    Text(
+                        error ?: "",
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                }
+                OutlinedTextField(
+                    state = textFieldState,
+                    modifier = Modifier.fillMaxSize(),
+                    placeholder = { Text("Escribí tu nota…") }
                 )
             }
-            OutlinedTextField(
-                value = text,
-                onValueChange = { text = it },
-                modifier = Modifier.fillMaxSize(),
-                placeholder = { Text("Escribí tu nota…") }
-            )
         }
     }
 }
