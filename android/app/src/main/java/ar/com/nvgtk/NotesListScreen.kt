@@ -122,7 +122,8 @@ fun NotesListScreen(
                         }
                     }
                 },
-                singleLine = true
+                singleLine = true,
+                shape = AppShapes.extraLarge
             )
             if (filtering) {
                 Text(
@@ -166,7 +167,8 @@ fun NotesListScreen(
                                     .animateItem()
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
-                                    .clickable { onOpen(note.id) }
+                                    .clickable { onOpen(note.id) },
+                                shape = AppShapes.largeIncreased
                             ) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(note.title, style = MaterialTheme.typography.titleMedium)

@@ -182,7 +182,8 @@ fun TrashScreen(
                                     .animateItem()
                                     .fillMaxWidth()
                                     .padding(vertical = 4.dp)
-                                    .clickable { openedId = note.id }
+                                    .clickable { openedId = note.id },
+                                shape = AppShapes.largeIncreased
                             ) {
                                 Row(
                                     Modifier.padding(12.dp),
