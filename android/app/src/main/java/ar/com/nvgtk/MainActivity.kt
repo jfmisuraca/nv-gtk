@@ -77,7 +77,7 @@ import java.io.File
 private sealed interface NvScreen {
     data object Trash : NvScreen
     data object List : NvScreen
-    data class Editor(val note: NoteSnapshot) : NvScreen
+    data class Editor(val note: NoteSnapshot, val autoFocus: Boolean = false) : NvScreen
 }
 
 /** T2: window width size class with the Material 3 cutoffs. */
@@ -141,6 +141,7 @@ private fun NvApp(storage: NvStorage) {
     var notes by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
     var trash by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
     var selectedId by remember { mutableStateOf<String?>(null) }
+    var editorAutoFocus by remember { mutableStateOf(false) }
     var showTrash by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
@@ -179,7 +180,7 @@ private fun NvApp(storage: NvStorage) {
     val screen: NvScreen = when {
         showTrash -> NvScreen.Trash
         selected == null -> NvScreen.List
-        else -> NvScreen.Editor(selected!!)   // smart-cast: selected != null here
+        else -> NvScreen.Editor(selected!!, editorAutoFocus)   // smart-cast: selected != null here
     }
     AnimatedContent<NvScreen>(
         targetState = screen,
@@ -206,19 +207,21 @@ private fun NvApp(storage: NvStorage) {
                 query = query,
                 error = error,
                 windowSizeClass = windowSizeClass,
-                onOpen = { selectedId = it },
+                onOpen = { selectedId = it; editorAutoFocus = false },
                 onQueryChange = { query = it },
                 onTrash = { showTrash = true },
                 onCreate = { ioOp {
                     val created = storage.createNote("Nota nueva")
                     selectedId = created.id  // open the editor on the new note
+                    editorAutoFocus = true   // auto-open the keyboard only on the brand-new note
                 } }
             )
             is NvScreen.Editor -> NoteEditorScreen(
                 dest.note,
                 storage,
                 windowSizeClass,
-                onDone = { selectedId = null; refresh() },
+                autoFocusKeyboard = dest.autoFocus,
+                onDone = { selectedId = null; editorAutoFocus = false; refresh() },
                 onRenamed = { renamed -> selectedId = renamed.id; refresh() }
             )
         }

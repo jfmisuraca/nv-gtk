@@ -22,6 +22,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material.icons.Icons
@@ -37,6 +40,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -63,6 +67,7 @@ fun NoteEditorScreen(
     note: NoteSnapshot,
     storage: NvStorage,
     windowSizeClass: WindowSizeClass,
+    autoFocusKeyboard: Boolean = false,
     onDone: () -> Unit,
     onRenamed: (NoteSnapshot) -> Unit
 ) {
@@ -74,6 +79,18 @@ fun NoteEditorScreen(
     var saving by remember { mutableStateOf(false) }
     var editingTitle by remember { mutableStateOf(false) }
     var titleText by remember(note.id) { mutableStateOf(note.title) }
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    // Auto-open the keyboard only when a brand-new note was just created, so
+    // editing can start immediately. Already-existing notes keep their default
+    // focus behavior (no IME pop-up on open).
+    LaunchedEffect(autoFocusKeyboard) {
+        if (autoFocusKeyboard) {
+            focusRequester.requestFocus()
+            keyboard?.show()
+        }
+    }
 
     fun saveIfChanged(next: () -> Unit) {
         val current = textFieldState.text.toString()
@@ -194,7 +211,9 @@ fun NoteEditorScreen(
                 }
                 OutlinedTextField(
                     state = textFieldState,
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .focusRequester(focusRequester),
                     placeholder = { Text("Escribí tu nota…") }
                 )
             }
