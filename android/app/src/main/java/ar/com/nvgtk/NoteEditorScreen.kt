@@ -185,6 +185,7 @@ fun NoteEditorScreen(
                     } else {
                         Text(
                             note.title,
+                            style = HeadlineMediumEmphasized,
                             modifier = Modifier.clickable { editingTitle = true }
                         )
                     }

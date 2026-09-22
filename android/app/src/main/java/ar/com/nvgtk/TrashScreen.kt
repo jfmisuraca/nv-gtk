@@ -169,7 +169,10 @@ fun TrashScreen(
                 ) { empty ->
                     if (empty) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Papelera vacía")
+                            Text(
+                                "Papelera vacía",
+                                style = BodyLargeEmphasized
+                            )
                         }
                     } else {
                         LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
@@ -245,7 +248,12 @@ private fun TrashNoteDetail(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(note.title) },
+                title = {
+                    Text(
+                        note.title,
+                        style = TitleLargeEmphasized
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.Filled.ArrowBack, contentDescription = "Volver")
@@ -277,7 +285,7 @@ private fun TrashNoteDetail(
                 SelectionContainer {
                     Text(
                         note.content.ifBlank { "(sin contenido)" },
-                        style = MaterialTheme.typography.bodyLarge
+                        style = BodyLargeEmphasized
                     )
                 }
                 if (note.tags.isNotEmpty()) {
