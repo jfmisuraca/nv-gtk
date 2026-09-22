@@ -109,7 +109,7 @@ class MainActivity : ComponentActivity() {
             } else {
                 CatppuccinLightColors
             }
-            MaterialTheme(colorScheme = colorScheme) {
+            MaterialTheme(colorScheme = colorScheme, typography = AppTypography) {
                 Surface(Modifier.fillMaxSize()) {
                     NvApp(storage)
                 }

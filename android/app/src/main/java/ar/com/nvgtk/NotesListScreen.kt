@@ -127,7 +127,7 @@ fun NotesListScreen(
             if (filtering) {
                 Text(
                     "${notes.size} resultados",
-                    style = MaterialTheme.typography.labelMedium,
+                    style = LabelMediumEmphasized,
                     modifier = Modifier
                         .padding(horizontal = 12.dp)
                         .animateContentSize()
@@ -153,7 +153,10 @@ fun NotesListScreen(
             ) { empty ->
                 if (empty) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Sin notas todavía")
+                        Text(
+                            "Sin notas todavía",
+                            style = BodyLargeEmphasized
+                        )
                     }
                 } else {
                     LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
