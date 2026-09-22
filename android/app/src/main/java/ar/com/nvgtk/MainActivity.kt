@@ -9,6 +9,9 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.scaleOut
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.navigationevent.NavigationEvent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -169,6 +172,18 @@ private fun NvApp(storage: NvStorage) {
     NavHost(
         navController = navController,
         startDestination = "list",
+        // Predictive back: scale the exiting screen toward the swipe edge,
+        // like the system back-to-home animation that follows the gesture,
+        // instead of the default center-origin scale.
+        predictivePopExitTransition = { swipeEdge ->
+            scaleOut(
+                targetScale = 0.7f,
+                transformOrigin = TransformOrigin(
+                    pivotFractionX = if (swipeEdge == NavigationEvent.EDGE_LEFT) 0f else 1f,
+                    pivotFractionY = 0.5f,
+                )
+            )
+        },
     ) {
         composable("list") {
             NotesListScreen(
