@@ -72,6 +72,14 @@ import uniffi.nv_core.NoteSnapshot
 import uniffi.nv_core.NvStorage
 import java.io.File
 
+/** Screen identity for AnimatedContent. The editor's note travels by value so
+ *  the exit-transition content renders the outgoing snapshot without `!!`. */
+private sealed interface NvScreen {
+    data object Trash : NvScreen
+    data object List : NvScreen
+    data class Editor(val note: NoteSnapshot) : NvScreen
+}
+
 /** T2: window width size class with the Material 3 cutoffs. */
 enum class WindowSizeClass {
     Compact, Medium, Expanded;
@@ -160,21 +168,30 @@ private fun NvApp(storage: NvStorage) {
 
     LaunchedEffect(storage) { refresh() }
 
+    // Debounce search: typing updates `query`; this relaunches after 300ms
+    // of inactivity so refresh() re-runs searchNotes with the final query.
+    LaunchedEffect(query) {
+        delay(300)
+        refresh()
+    }
+
     val selected = notes.firstOrNull { it.id == selectedId }
-    AnimatedContent(
-        targetState = when {
-            showTrash -> "trash"
-            selected == null -> "list"
-            else -> "editor"
-        },
+    val screen: NvScreen = when {
+        showTrash -> NvScreen.Trash
+        selected == null -> NvScreen.List
+        else -> NvScreen.Editor(selected!!)   // smart-cast: selected != null here
+    }
+    AnimatedContent<NvScreen>(
+        targetState = screen,
+        contentKey = { it::class },
         transitionSpec = {
             (fadeIn() + scaleIn(initialScale = 0.98f)) togetherWith
                 (fadeOut() + scaleOut(targetScale = 0.98f))
         },
         label = "pantalla-actual"
-    ) { screen ->
-        when (screen) {
-            "trash" -> TrashScreen(
+    ) { dest ->
+        when (dest) {
+            NvScreen.Trash -> TrashScreen(
                 trash = trash,
                 error = error,
                 windowSizeClass = windowSizeClass,
@@ -183,7 +200,7 @@ private fun NvApp(storage: NvStorage) {
                 onPurge = { id -> ioOp { storage.purgeNote(id) } },
                 onEmpty = { ioOp { storage.emptyTrash() } }
             )
-            "list" -> NotesListScreen(
+            NvScreen.List -> NotesListScreen(
                 notes = results ?: notes,
                 filtering = results != null,
                 query = query,
@@ -192,10 +209,13 @@ private fun NvApp(storage: NvStorage) {
                 onOpen = { selectedId = it },
                 onQueryChange = { query = it },
                 onTrash = { showTrash = true },
-                onCreate = { ioOp { storage.createNote("Nota nueva") } }
+                onCreate = { ioOp {
+                    val created = storage.createNote("Nota nueva")
+                    selectedId = created.id  // open the editor on the new note
+                } }
             )
-            "editor" -> NoteEditorScreen(
-                selected!!,
+            is NvScreen.Editor -> NoteEditorScreen(
+                dest.note,
                 storage,
                 windowSizeClass,
                 onDone = { selectedId = null; refresh() },
