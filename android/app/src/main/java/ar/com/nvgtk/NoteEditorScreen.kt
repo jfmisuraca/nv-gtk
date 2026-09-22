@@ -46,11 +46,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.nv_core.NoteSnapshot
@@ -58,8 +60,9 @@ import uniffi.nv_core.NvStorage
 
 /**
  * Content editor. The title is editable in place (tap it): confirming calls
- * the core rename API, which may disambiguate on collisions. Content saves
- * only when changed, on back navigation (button or system gesture).
+ * the core rename API, which may disambiguate on collisions. Content
+ * autosaves write-through (no debounce tail to lose on a fast system back);
+ * the back arrow also flushes any unsaved change before popping.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -79,6 +82,7 @@ fun NoteEditorScreen(
     var saving by remember { mutableStateOf(false) }
     var editingTitle by remember { mutableStateOf(false) }
     var titleText by remember(note.id) { mutableStateOf(note.title) }
+    var savedText by remember(note.id) { mutableStateOf(note.content) }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
 
@@ -90,6 +94,28 @@ fun NoteEditorScreen(
             focusRequester.requestFocus()
             keyboard?.show()
         }
+    }
+
+    // Autosave: persist the latest text write-through (no artificial debounce)
+    // so a SYSTEM back gesture (which bypasses onDone) never loses edits. A
+    // fresh emission while one write is in-flight is coalesced by `conflate`,
+    // not dropped: the current write finishes and the latest text is written
+    // next. This keeps the loss window to a single in-flight write (ms), not a
+    // debounce tail that a fast 3-button back would cancel.
+    LaunchedEffect(textFieldState) {
+        snapshotFlow { textFieldState.text.toString() }
+            .conflate()
+            .collect { current ->
+                if (current != savedText && !saving) {
+                    saving = true
+                    withContext(Dispatchers.IO) {
+                        runCatching { storage.saveNote(note.id, current) }
+                    }
+                        .onFailure { error = it.message }
+                        .onSuccess { savedText = current }
+                    saving = false
+                }
+            }
     }
 
     fun saveIfChanged(next: () -> Unit) {
@@ -136,13 +162,12 @@ fun NoteEditorScreen(
         }
     }
 
-    BackHandler {
-        if (editingTitle) {
-            editingTitle = false
-            titleText = note.title
-        } else {
-            saveIfChanged(onDone)
-        }
+    // Title editing is IN-SCREEN state, not navigation: back only closes title
+    // editing while active. Real navigation back reaches the NavController
+    // untouched so the predictive-back animation can play.
+    BackHandler(enabled = editingTitle) {
+        editingTitle = false
+        titleText = note.title
     }
 
     Scaffold(
