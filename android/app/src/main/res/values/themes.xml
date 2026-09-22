@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?><!--
+    Pre-Compose window theme (T8). The app is Compose-only and deliberately does
+    NOT depend on com.google.android.material, so the real Theme.Material3.* XML
+    families are unavailable. This theme only styles the window BEFORE the first
+    Compose frame (boot + system splash); all real theming lives in Compose
+    (MainActivity: dynamic color with Catppuccin fallback, AppTypography,
+    AppShapes).
+
+    Light mode: parent = platform Material Light with the Catppuccin Latte
+    `base` (#EFF1F5) as windowBackground, so boot and the day/night switch never
+    flash a dark baseline underneath the light UI.
+-->
+<resources>
+    <style name="Theme.NvGtk" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">#FFEFF1F5</item>
+    </style>
+</resources>
