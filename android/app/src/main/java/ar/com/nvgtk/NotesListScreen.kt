@@ -1,5 +1,15 @@
 package ar.com.nvgtk
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,9 +38,14 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
+
+
 import uniffi.nv_core.NoteSnapshot
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -58,7 +73,25 @@ fun NotesListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onCreate) {
+            // FAB bounces in on first show (spring is StiffnessMediumLow →
+            // noticeable but not janky; MediumBouncy gives the playful overshoot).
+            val fabEntrance = remember { Animatable(0f) }
+            LaunchedEffect(Unit) {
+                fabEntrance.animateTo(
+                    1f,
+                    animationSpec = spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMediumLow
+                    )
+                )
+            }
+            FloatingActionButton(
+                onClick = onCreate,
+                modifier = Modifier.graphicsLayer {
+                    scaleX = fabEntrance.value
+                    scaleY = fabEntrance.value
+                }
+            ) {
                 Icon(Icons.Filled.Add, contentDescription = "Nueva nota")
             }
         }
@@ -95,7 +128,9 @@ fun NotesListScreen(
                 Text(
                     "${notes.size} resultados",
                     style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(horizontal = 12.dp)
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .animateContentSize()
                 )
             }
             if (error != null) {
@@ -105,35 +140,48 @@ fun NotesListScreen(
                     modifier = Modifier.padding(8.dp)
                 )
             }
-            if (notes.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Sin notas todavía")
-                }
-            } else {
-                LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
-                    items(notes, key = { it.id }) { note ->
-                        ElevatedCard(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp)
-                                .clickable { onOpen(note.id) }
-                        ) {
-                            Column(Modifier.padding(12.dp)) {
-                                Text(note.title, style = MaterialTheme.typography.titleMedium)
-                                if (note.content.isNotBlank()) {
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        note.content.take(140),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 3
-                                    )
-                                }
-                                if (note.tags.isNotEmpty()) {
-                                    Spacer(Modifier.height(4.dp))
-                                    Text(
-                                        note.tags.joinToString(" ") { "#$it" },
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
+            AnimatedContent(
+                targetState = notes.isEmpty(),
+                transitionSpec = {
+                    // Empty↔list dissolve so the "Sin notas todavía" ghost
+                    // never *pops* away from the list; scale crossfade is the
+                    // M3 recommened treatment (fade is fine, scale adds depth).
+                    (fadeIn() + scaleIn(initialScale = 0.96f)) togetherWith
+                        (fadeOut() + scaleOut(targetScale = 0.96f))
+                },
+                label = "notas-vacio-o-lista"
+            ) { empty ->
+                if (empty) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Sin notas todavía")
+                    }
+                } else {
+                    LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
+                        items(notes, key = { it.id }) { note ->
+                            ElevatedCard(
+                                Modifier
+                                    .animateItem()
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp)
+                                    .clickable { onOpen(note.id) }
+                            ) {
+                                Column(Modifier.padding(12.dp)) {
+                                    Text(note.title, style = MaterialTheme.typography.titleMedium)
+                                    if (note.content.isNotBlank()) {
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            note.content.take(140),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            maxLines = 3
+                                        )
+                                    }
+                                    if (note.tags.isNotEmpty()) {
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            note.tags.joinToString(" ") { "#$it" },
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
                                 }
                             }
                         }
