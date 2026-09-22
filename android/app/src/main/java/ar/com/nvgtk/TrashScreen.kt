@@ -70,8 +70,6 @@ fun TrashScreen(
     var confirmEmpty by remember { mutableStateOf(false) }
     var openedId by remember { mutableStateOf<String?>(null) }
 
-    BackHandler(onBack = onBack)
-
     val opened = trash.firstOrNull { it.id == openedId }
     if (opened != null) {
         TrashNoteDetail(

@@ -5,16 +5,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +44,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +59,9 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -71,14 +69,6 @@ import kotlinx.coroutines.withContext
 import uniffi.nv_core.NoteSnapshot
 import uniffi.nv_core.NvStorage
 import java.io.File
-
-/** Screen identity for AnimatedContent. The editor's note travels by value so
- *  the exit-transition content renders the outgoing snapshot without `!!`. */
-private sealed interface NvScreen {
-    data object Trash : NvScreen
-    data object List : NvScreen
-    data class Editor(val note: NoteSnapshot, val autoFocus: Boolean = false) : NvScreen
-}
 
 /** T2: window width size class with the Material 3 cutoffs. */
 enum class WindowSizeClass {
@@ -140,9 +130,8 @@ private fun NvApp(storage: NvStorage) {
     val storage = storage
     var notes by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
     var trash by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
-    var selectedId by remember { mutableStateOf<String?>(null) }
+    var editorNote by remember { mutableStateOf<NoteSnapshot?>(null) }
     var editorAutoFocus by remember { mutableStateOf(false) }
-    var showTrash by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<NoteSnapshot>?>(null) }
@@ -176,53 +165,64 @@ private fun NvApp(storage: NvStorage) {
         refresh()
     }
 
-    val selected = notes.firstOrNull { it.id == selectedId }
-    val screen: NvScreen = when {
-        showTrash -> NvScreen.Trash
-        selected == null -> NvScreen.List
-        else -> NvScreen.Editor(selected!!, editorAutoFocus)   // smart-cast: selected != null here
-    }
-    AnimatedContent<NvScreen>(
-        targetState = screen,
-        contentKey = { it::class },
-        transitionSpec = {
-            (fadeIn() + scaleIn(initialScale = 0.98f)) togetherWith
-                (fadeOut() + scaleOut(targetScale = 0.98f))
-        },
-        label = "pantalla-actual"
-    ) { dest ->
-        when (dest) {
-            NvScreen.Trash -> TrashScreen(
-                trash = trash,
-                error = error,
-                windowSizeClass = windowSizeClass,
-                onBack = { showTrash = false },
-                onRestore = { id -> ioOp { storage.restoreNote(id) } },
-                onPurge = { id -> ioOp { storage.purgeNote(id) } },
-                onEmpty = { ioOp { storage.emptyTrash() } }
-            )
-            NvScreen.List -> NotesListScreen(
+    val navController = rememberNavController()
+    NavHost(navController = navController, startDestination = "list") {
+        composable("list") {
+            NotesListScreen(
                 notes = results ?: notes,
                 filtering = results != null,
                 query = query,
                 error = error,
                 windowSizeClass = windowSizeClass,
-                onOpen = { selectedId = it; editorAutoFocus = false },
+                onOpen = { id ->
+                    editorNote = notes.firstOrNull { it.id == id }
+                    editorAutoFocus = false
+                    navController.navigate("editor")
+                },
                 onQueryChange = { query = it },
-                onTrash = { showTrash = true },
-                onCreate = { ioOp {
-                    val created = storage.createNote("Nota nueva")
-                    selectedId = created.id  // open the editor on the new note
-                    editorAutoFocus = true   // auto-open the keyboard only on the brand-new note
-                } }
+                onTrash = { navController.navigate("trash") },
+                onCreate = {
+                    ioOp {
+                        val created = storage.createNote("Nota nueva")
+                        editorNote = created  // editor reads the note BY VALUE after creation
+                        editorAutoFocus = true // auto-open the keyboard only on the brand-new note
+                        navController.navigate("editor")
+                    }
+                }
             )
-            is NvScreen.Editor -> NoteEditorScreen(
-                dest.note,
-                storage,
-                windowSizeClass,
-                autoFocusKeyboard = dest.autoFocus,
-                onDone = { selectedId = null; editorAutoFocus = false; refresh() },
-                onRenamed = { renamed -> selectedId = renamed.id; refresh() }
+        }
+        composable("editor") {
+            // Refresh the list whenever the editor leaves composition, so a
+            // SYSTEM back gesture (which bypasses onDone) still shows fresh data.
+            DisposableEffect(Unit) {
+                onDispose { refresh() }
+            }
+            val note = editorNote
+            if (note == null) return@composable
+            NoteEditorScreen(
+                note = note,
+                storage = storage,
+                windowSizeClass = windowSizeClass,
+                autoFocusKeyboard = editorAutoFocus,
+                onDone = {
+                    editorAutoFocus = false
+                    navController.popBackStack()
+                },
+                onRenamed = { renamed ->
+                    editorNote = renamed
+                    refresh()
+                }
+            )
+        }
+        composable("trash") {
+            TrashScreen(
+                trash = trash,
+                error = error,
+                windowSizeClass = windowSizeClass,
+                onBack = { navController.popBackStack() },
+                onRestore = { id -> ioOp { storage.restoreNote(id) } },
+                onPurge = { id -> ioOp { storage.purgeNote(id) } },
+                onEmpty = { ioOp { storage.emptyTrash() } }
             )
         }
     }
