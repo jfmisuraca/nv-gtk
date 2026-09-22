@@ -200,11 +200,18 @@ private fun NvApp(storage: NvStorage) {
                 onQueryChange = { query = it },
                 onTrash = { navController.navigate("trash") },
                 onCreate = {
-                    ioOp {
-                        val created = storage.createNote("Nota nueva")
-                        editorNote = created  // editor reads the note BY VALUE after creation
-                        editorAutoFocus = true // auto-open the keyboard only on the brand-new note
-                        navController.navigate("editor")
+                    // createNote is IO; navigation and Compose state must run
+                    // on the main thread (NavController touches the lifecycle).
+                    scope.launch {
+                        val created = withContext(Dispatchers.IO) {
+                            runCatching { storage.createNote("Nota nueva") }
+                        }
+                        created.onSuccess { note ->
+                            editorNote = note      // editor reads the note BY VALUE after creation
+                            editorAutoFocus = true // auto-open the keyboard only on the brand-new note
+                            navController.navigate("editor")
+                            refresh()
+                        }.onFailure { error = it.message }
                     }
                 }
             )
