@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  nv-gtk user-facing strings.
+
+  LOCALE DECISION (user, single-locale): the app is Rioplatense Spanish ONLY.
+  The default `values/` bucket holds the canonical Spanish (Rioplatense) text.
+  Do NOT create values-es/ or any other locale — there are no other locales in
+  the product. The launcher label (app_name) is a product brand, kept as-is.
+-->
+<resources>
+    <!-- App (launcher label) -->
+    <string name="app_name">nv-gtk</string>
+
+    <!-- Notes list screen -->
+    <string name="list_title">Notas</string>
+    <string name="trash_action">Papelera</string>
+    <string name="new_note">Nueva nota</string>
+    <string name="search_placeholder">Buscar…</string>
+    <string name="search_field_label">Buscar notas</string>
+    <string name="clear_search">Limpiar</string>
+    <string name="empty_list">Sin notas todavía</string>
+    <plurals name="search_results_count">
+        <item quantity="one">1 resultado</item>
+        <item quantity="other">%1$d resultados</item>
+    </plurals>
+
+    <!-- Note editor screen -->
+    <string name="back">Volver</string>
+    <string name="delete_note">Borrar</string>
+    <string name="editor_placeholder">Escribí tu nota…</string>
+    <string name="editor_field_label">Contenido de la nota</string>
+    <string name="title_field_label">Título de la nota</string>
+    <string name="new_note_default_title">Nota nueva</string>
+
+    <!-- Trash screen -->
+    <string name="trash_title">Papelera</string>
+    <string name="empty_trash">Papelera vacía</string>
+    <string name="restore">Restaurar</string>
+    <string name="delete">Eliminar</string>
+    <string name="empty_trash_action">Vaciar</string>
+    <string name="purge_dialog_title">Eliminar definitivamente</string>
+    <string name="confirm_purge">¿Borrar \"%1$s\" para siempre?</string>
+    <string name="empty_trash_dialog_title">Vaciar papelera</string>
+    <plurals name="confirm_empty_count">
+        <item quantity="one">¿Eliminar para siempre la 1 nota?</item>
+        <item quantity="other">¿Eliminar para siempre las %1$d notas?</item>
+    </plurals>
+    <string name="cancel">Cancelar</string>
+    <string name="no_content_placeholder">(sin contenido)</string>
+</resources>
