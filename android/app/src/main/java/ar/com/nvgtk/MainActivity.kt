@@ -6,17 +6,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.AnimatedContentTransitionScope
-import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.scaleOut
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -174,33 +166,9 @@ private fun NvApp(storage: NvStorage) {
     }
 
     val navController = rememberNavController()
-    // Sliding transitions match the platform back animation: on pop the whole
-    // screen slides right following the gesture (previous screen static
-    // beneath), instead of Navigation's default cross-fade. Forward nav slides
-    // the new screen in from the right, same as the system stack push.
     NavHost(
         navController = navController,
         startDestination = "list",
-        enterTransition = {
-            slideIntoContainer(
-                animationSpec = tween(300),
-                towards = SlideDirection.Left
-            )
-        },
-        exitTransition = { ExitTransition.None },
-        popEnterTransition = { EnterTransition.None },
-        popExitTransition = {
-            // Match the system back-to-home feel: the screen both slides away
-            // AND scales down as a whole, leaving the previous screen static
-            // beneath (like the home launcher behind the shrinking window).
-            slideOutOfContainer(
-                animationSpec = tween(300, easing = FastOutSlowInEasing),
-                towards = SlideDirection.Right
-            ) + scaleOut(
-                targetScale = 0.9f,
-                transformOrigin = TransformOrigin(pivotFractionX = 0.5f, pivotFractionY = 0.5f)
-            )
-        }
     ) {
         composable("list") {
             NotesListScreen(

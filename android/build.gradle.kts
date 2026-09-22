@@ -1,9 +1,10 @@
 // Top-level build file. Versions are declared here via the plugin aliases
 // applied in :app; keep them in one place so Dependabot-style bumps are trivial.
 plugins {
-    // 8.6.1 is the minimum AGP whose metadata check accepts material3 1.4.0 /
-    // Compose 1.11 (AAR minAndroidGradlePluginVersion = 8.6.0); 8.5.2 fails on it.
-    id("com.android.application") version "8.6.1" apply false
-    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+    // 9.1.1 supports API level 37 (android-37.0); AGP 9 bundles built-in Kotlin
+    // support with a runtime dependency on KGP 2.2.10, so the kotlin.android
+    // plugin must NOT be applied (AGP registers the kotlin extension itself)
+    // and the compose plugin below must match that Kotlin version.
+    id("com.android.application") version "9.1.1" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.2.10" apply false
 }
