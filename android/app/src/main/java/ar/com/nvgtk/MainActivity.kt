@@ -60,6 +60,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
@@ -129,6 +130,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun NvApp(storage: NvStorage) {
     val scope = rememberCoroutineScope()
+    val newNoteDefaultTitle = stringResource(R.string.new_note_default_title)
     val windowSizeClass = WindowSizeClass.fromWidth(LocalConfiguration.current.screenWidthDp)
     val storage = storage
     var notes by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
@@ -204,7 +206,7 @@ private fun NvApp(storage: NvStorage) {
                     // on the main thread (NavController touches the lifecycle).
                     scope.launch {
                         val created = withContext(Dispatchers.IO) {
-                            runCatching { storage.createNote("Nota nueva") }
+                            runCatching { storage.createNote(newNoteDefaultTitle) }
                         }
                         created.onSuccess { note ->
                             editorNote = note      // editor reads the note BY VALUE after creation
