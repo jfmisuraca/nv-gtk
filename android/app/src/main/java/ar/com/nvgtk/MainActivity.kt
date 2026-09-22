@@ -6,9 +6,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -166,7 +171,28 @@ private fun NvApp(storage: NvStorage) {
     }
 
     val navController = rememberNavController()
-    NavHost(navController = navController, startDestination = "list") {
+    // Sliding transitions match the platform back animation: on pop the whole
+    // screen slides right following the gesture (previous screen static
+    // beneath), instead of Navigation's default cross-fade. Forward nav slides
+    // the new screen in from the right, same as the system stack push.
+    NavHost(
+        navController = navController,
+        startDestination = "list",
+        enterTransition = {
+            slideIntoContainer(
+                animationSpec = tween(300),
+                towards = SlideDirection.Left
+            )
+        },
+        exitTransition = { ExitTransition.None },
+        popEnterTransition = { EnterTransition.None },
+        popExitTransition = {
+            slideOutOfContainer(
+                animationSpec = tween(300),
+                towards = SlideDirection.Right
+            )
+        }
+    ) {
         composable("list") {
             NotesListScreen(
                 notes = results ?: notes,
