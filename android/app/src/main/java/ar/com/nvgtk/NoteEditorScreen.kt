@@ -1,6 +1,10 @@
 package ar.com.nvgtk
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -177,10 +181,11 @@ fun NoteEditorScreen(
                     .fillMaxWidth()
                     .widthIn(max = windowSizeClass.contentMaxWidth)
                     .fillMaxHeight()
+                    .animateContentSize()
                     .then(if (imeBottom > 0) Modifier.imePadding() else Modifier.navigationBarsPadding())
                     .padding(8.dp)
             ) {
-                if (error != null) {
+                AnimatedVisibility(visible = error != null) {
                     Text(
                         error ?: "",
                         color = MaterialTheme.colorScheme.error,
