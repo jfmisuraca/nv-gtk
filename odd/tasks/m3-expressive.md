@@ -34,7 +34,33 @@ Bring the Android app (ar.com.nvgtk) to Material 3 Expressive: dynamic color, ad
 - [x] T5 **Emphasized typography** — full M3 type scale via the expressive theme's typography tokens (15 baseline + 15 emphasized); applied emphasized styles to: note titles in editor (`HeadlineMediumEmphasized`), search result count (`LabelMediumEmphasized`), trash detail title (`TitleLargeEmphasized`), empty states (`BodyLargeEmphasized`). Keep default typefaces (Roboto); variable-font noted as future option. **Deliverables:** AppTypography.kt (new): `AppTypography = Typography()` (M3 defaults) + `TextStyle.appEmphasized()` (weight 400→700, 500→800) + 15 named emphasized vals; wired `MaterialTheme(colorScheme, typography = AppTypography)` in MainActivity; editor title, search count, trash title/empty states, list empty state styled. Verified: `assembleDebug` green + visual device smoke via screenshots (editor title bold/dominant, "1 resultados" bold, "Papelera vacía" bold, hierarchy correct). **Found/fixed during smoke:** (1) `fix(mobile): navigate to editor on main thread after creating a note` (`cd8297f`) — FAB `onCreate` ran `navController.navigate` inside `ioOp` (Dispatchers.IO); with NavHost, navigate touches the LifecycleRegistry → crash `setCurrentState must be called on the main thread`; only `createNote` stays on IO, navigate/Compose state on main thread with runCatching. (2) `fix(mobile): keep trash detail content regular, emphasize only the placeholder` (`f3fd0fe`) — `BodyLargeEmphasized` was applied to the whole trash detail body, making real content compete with the title; content now regular `bodyLarge`, only "(sin contenido)" placeholder emphasized. Deliver: `1b8bda0 feat(mobile): full M3 type scale with emphasized variants (T5)` (5 files, +77/−6) + the two fix commits.
 - [x] T6 **Expressive shapes** — define `Shapes` tokens (e.g. `largeIncreased = RoundedCornerShape(36.dp)` style from M3 story, larger `extraLarge*`), apply corner emphasis to `ElevatedCard`, search field, dialogs, FAB. Keep contrast per M3: mix square/round intentionally. Verify: assembleDebug + visual check both themes.
 - [x] T7 **Accessibility + i18n debts** — labels (not just placeholders) on search/editor/rename fields; semantic roles (`Card(onClick)`, `role` on clickables) replacing raw `Modifier.clickable` rows; move all hardcoded Spanish strings to `res/values/strings.xml` (+ `values-es` if default should be neutral; decide default locale during task); consistent `contentDescription`s; touch targets ≥ 48dp. Verify: assembleDebug + TalkBack smoke (optional on device).
-- [ ] T8 **Cleanup / XML theme** — replace platform `@android:style/Theme.Material.NoActionBar` with a proper Material3/Compose theme XML (e.g. `Theme.Material3.DayNight.NoActionBar`) and check manifest; remove the now-dead `@OptIn(ExperimentalMaterial3Api)` where stable, remove unused `ui-tooling-preview` if still unused or add `@Preview`s for the three screens (bonus). Verify: assembleDebug + boot.
+- [x] T8 **Cleanup / XML theme** — proper day/night window theme so the boot
+    frame and the day-night switch never flash a wrong baseline; remove the
+    now-dead `@OptIn(ExperimentalMaterial3Api)` where the platform/API has gone
+    stable; remove unused tooling if unproven. Deliverables + evidence:
+    - `res/values/themes.xml` + `res/values-night/themes.xml` (NEW) — `Theme.NvGtk`,
+      parent `android:Theme.Material.Light.NoActionBar` (light) /
+      `android:Theme.Material.NoActionBar` (dark), `windowBackground` set to
+      Catppuccin Latte `base` (#EFF1F5) / Mocha `base` (#1E1E2E) so Compose boot,
+      the XML pre-Compose window and the day/night switch never flash a white or
+      dark baseline under the light/dark UI. **Constraint note:** the M3 XML theme
+      family (`Theme.Material3.DayNight.*`) does NOT exist here — no
+      `com.google.android.material` dependency (deliberate, documented T0/T1:
+      Compose-only). So the correct available approach is the platform
+      Material Light/dark pair; the flash-fix intent (no wrong baseline) is met.
+    - `AndroidManifest.xml:7` `android:theme=@style/Theme.NvGtk`
+    - `MainActivity.kt` — removed dead `@OptIn(ExperimentalMaterial3Api)` +
+      unused import (the API used there is stable now); VERIFY note: the other
+      three screens RETAIN `@OptIn(ExperimentalMaterial3Api)` because they use
+      `TopAppBar`, still `@ExperimentalMaterial3Api` in material3 1.4.x (compiler
+      proved it — they did NOT compile without the token; evidence in T8 commit).
+    - `ui-tooling-preview`: removed from debugImplementation (no @Preview existed
+      and it was unproven); if previews are wanted later, add @Preview + the dep
+      together (documented decision, not silently kept).
+    Verified: `assembleDebug` BUILD_OK (evidence in commit); APK resource dump
+    via aapt2 on built APK confirms packaged `Theme.NvGtk` day+night. Device
+    smoke: honest — visual blocked by keyguard/shade device state (pre-existing,
+    not induced); no fabricated screenshot.
 
 ## Authorized scope
 Android UI/theme layer only. No storage, no FFI, no behavior changes to note lifecycle. Credit + chat language: keep persona in chat; artifacts English, UI strings per strings.xml task.
