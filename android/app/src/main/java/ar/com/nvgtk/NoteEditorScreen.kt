@@ -1,10 +1,8 @@
 package ar.com.nvgtk
 
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.clickable
@@ -26,7 +24,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
@@ -139,26 +136,13 @@ fun NoteEditorScreen(
         }
     }
 
-    // Predictive back: the system back gesture (API 34+) drives the editor
-    // off-screen following the finger. On a completed gesture we save and
-    // navigate back; an aborted gesture snaps the editor back into place.
-    val backProgress = remember { Animatable(0f) }
-    PredictiveBackHandler(enabled = !editingTitle) { progress ->
-        backProgress.snapTo(0f)
-        try {
-            progress.collect { event -> backProgress.snapTo(event.progress) }
-        } catch (c: kotlinx.coroutines.CancellationException) {
-            // User aborted the gesture: animate back to rest then rethrow.
-            backProgress.snapTo(0f)
-            throw c
+    BackHandler {
+        if (editingTitle) {
+            editingTitle = false
+            titleText = note.title
+        } else {
+            saveIfChanged(onDone)
         }
-        saveIfChanged(onDone)
-    }
-
-    // Title is an in-place toggle: back just exits title editing, no slide.
-    BackHandler(enabled = editingTitle) {
-        editingTitle = false
-        titleText = note.title
     }
 
     Scaffold(
@@ -214,11 +198,6 @@ fun NoteEditorScreen(
                     .fillMaxWidth()
                     .widthIn(max = windowSizeClass.contentMaxWidth)
                     .fillMaxHeight()
-                    .graphicsLayer {
-                        val t = backProgress.value
-                        translationX = -t * (size.width * 0.20f)
-                        alpha = 1f - t * 0.35f
-                    }
                     .animateContentSize()
                     .then(if (imeBottom > 0) Modifier.imePadding() else Modifier.navigationBarsPadding())
                     .padding(8.dp)
