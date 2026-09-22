@@ -11,9 +11,12 @@ import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.scaleOut
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -187,9 +190,15 @@ private fun NvApp(storage: NvStorage) {
         exitTransition = { ExitTransition.None },
         popEnterTransition = { EnterTransition.None },
         popExitTransition = {
+            // Match the system back-to-home feel: the screen both slides away
+            // AND scales down as a whole, leaving the previous screen static
+            // beneath (like the home launcher behind the shrinking window).
             slideOutOfContainer(
-                animationSpec = tween(300),
+                animationSpec = tween(300, easing = FastOutSlowInEasing),
                 towards = SlideDirection.Right
+            ) + scaleOut(
+                targetScale = 0.9f,
+                transformOrigin = TransformOrigin(pivotFractionX = 0.5f, pivotFractionY = 0.5f)
             )
         }
     ) {
