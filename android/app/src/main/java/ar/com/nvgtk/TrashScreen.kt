@@ -283,10 +283,19 @@ private fun TrashNoteDetail(
                     .padding(12.dp)
             ) {
                 SelectionContainer {
-                    Text(
-                        note.content.ifBlank { "(sin contenido)" },
-                        style = BodyLargeEmphasized
-                    )
+                    // Emphasize only the empty placeholder; real content must
+                    // stay regular so it never competes with the title.
+                    if (note.content.isBlank()) {
+                        Text(
+                            "(sin contenido)",
+                            style = BodyLargeEmphasized
+                        )
+                    } else {
+                        Text(
+                            note.content,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
                 }
                 if (note.tags.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
