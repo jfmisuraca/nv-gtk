@@ -351,8 +351,7 @@ mod tests {
         fs::write(dir.join("hello.md"), "hi").unwrap();
         let config = Config {
             notes_dir: dir.clone(),
-            default_extension: "md".to_string(),
-            auto_save_ms: 300,
+            ..Config::default()
         };
         let storage = StorageManager::new(&config);
         assert_eq!(storage.notes_dir, dir);
@@ -362,8 +361,7 @@ mod tests {
         // Missing directory: empty list, no panic.
         let ghost_cfg = Config {
             notes_dir: dir.join("does-not-exist"),
-            default_extension: "md".to_string(),
-            auto_save_ms: 300,
+            ..Config::default()
         };
         let ghost_storage = StorageManager::new(&ghost_cfg);
         assert!(ghost_storage.notes.is_empty());
