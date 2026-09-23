@@ -135,11 +135,19 @@ theme lacks are aliased to the theme's nearest defined hue — never to another 
     tests), `cargo test -p nv_core` 34/34, `cargo check --workspace` warning-free,
     `sh scripts/verify-theme.sh` 4/4 PASS. No header bar, menubar or toolbar added; every hex
     value unchanged. Assess: `under_budget`, joins the slice accumulating from `ead875e`.
-- [ ] T6 **Desktop verification** — extend `scripts/verify-theme.sh` to assert rendered pixels
+- [x] T6 **Desktop verification** — extend `scripts/verify-theme.sh` to assert rendered pixels
   per theme and variant (Dracula `#282A36`, Alucard `#FFFBEB`, Flexoki `#100F0F`/`#FFFCF0`,
   Catppuccin `#1E1E2E`/`#EFF1F5`), reusing the `GSETTINGS_BACKEND=keyfile` +
   `ADW_DISABLE_PORTAL=1` isolation already documented in `odd/tasks/catppuccin-theme.md`, plus
   one pywal-fixture run.
+  - **Done:** `scripts/verify-theme.sh` (195 lines) asserts the theme x variant matrix
+    (Catppuccin/Dracula/Flexoki x light/dark, background + mantle surface per case) plus
+    pywal light/dark runs proving the wallpaper theme ignores the OS variant, keeping the
+    alias-parity and autocomplete-alias checks. All expected hexes verified verbatim against
+    the `src/palettes.rs` tables — no mismatch. Evidence: `sh -n` clean, shellcheck
+    info-only (SC2016/SC2013, both false positives), `cargo test -p nv_core` -> 34/34,
+    `xvfb-run -a cargo test -p nv-gtk --bin nv-gtk` -> 20/20, `sh scripts/verify-theme.sh`
+    -> 10/10 PASS (6 matrix + 2 pywal + alias parity + autocomplete).
 - [ ] T7 **Android palettes** — `ThemePalettes.kt` (NEW): Dracula/Alucard and Flexoki light/dark
   `ColorScheme`s mapped onto the same Material 3 roles `CatppuccinTheme.kt` already uses, an
   `NvTheme` enum, and `colorSchemeFor(theme, dark, context)` returning the dynamic scheme for
