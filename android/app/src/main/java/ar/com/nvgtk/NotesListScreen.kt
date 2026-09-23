@@ -10,7 +10,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -43,6 +42,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 
@@ -64,10 +67,10 @@ fun NotesListScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Notas") },
+                title = { Text(stringResource(R.string.list_title)) },
                 actions = {
                     IconButton(onClick = onTrash) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Papelera")
+                        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.trash_action))
                     }
                 }
             )
@@ -92,7 +95,7 @@ fun NotesListScreen(
                     scaleY = fabEntrance.value
                 }
             ) {
-                Icon(Icons.Filled.Add, contentDescription = "Nueva nota")
+                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.new_note))
             }
         }
     ) { padding ->
@@ -103,6 +106,7 @@ fun NotesListScreen(
             Modifier.padding(padding).fillMaxSize(),
             contentAlignment = Alignment.TopCenter
         ) {
+            val searchFieldLabel = stringResource(R.string.search_field_label)
             Column(
                 Modifier
                     .fillMaxWidth()
@@ -112,22 +116,26 @@ fun NotesListScreen(
                 OutlinedTextField(
                 value = query,
                 onValueChange = onQueryChange,
-                modifier = Modifier.fillMaxWidth().padding(8.dp),
-                placeholder = { Text("Buscar…") },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp)
+                    .semantics { contentDescription = searchFieldLabel },
+                placeholder = { Text(stringResource(R.string.search_placeholder)) },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                 trailingIcon = {
                     if (query.isNotEmpty()) {
                         IconButton(onClick = { onQueryChange("") }) {
-                            Icon(Icons.Filled.Clear, contentDescription = "Limpiar")
+                            Icon(Icons.Filled.Clear, contentDescription = stringResource(R.string.clear_search))
                         }
                     }
                 },
-                singleLine = true
+                singleLine = true,
+                shape = AppShapes.extraLarge
             )
             if (filtering) {
                 Text(
-                    "${notes.size} resultados",
-                    style = MaterialTheme.typography.labelMedium,
+                    pluralStringResource(R.plurals.search_results_count, notes.size, notes.size),
+                    style = LabelMediumEmphasized,
                     modifier = Modifier
                         .padding(horizontal = 12.dp)
                         .animateContentSize()
@@ -153,17 +161,21 @@ fun NotesListScreen(
             ) { empty ->
                 if (empty) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Sin notas todavía")
+                        Text(
+                            stringResource(R.string.empty_list),
+                            style = BodyLargeEmphasized
+                        )
                     }
                 } else {
                     LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
                         items(notes, key = { it.id }) { note ->
                             ElevatedCard(
-                                Modifier
+                                onClick = { onOpen(note.id) },
+                                modifier = Modifier
                                     .animateItem()
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
-                                    .clickable { onOpen(note.id) }
+                                    .padding(vertical = 4.dp),
+                                shape = AppShapes.largeIncreased
                             ) {
                                 Column(Modifier.padding(12.dp)) {
                                     Text(note.title, style = MaterialTheme.typography.titleMedium)

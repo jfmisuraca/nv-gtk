@@ -12,7 +12,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,6 +47,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import uniffi.nv_core.NoteSnapshot
 
@@ -70,8 +71,6 @@ fun TrashScreen(
     var confirmEmpty by remember { mutableStateOf(false) }
     var openedId by remember { mutableStateOf<String?>(null) }
 
-    BackHandler(onBack = onBack)
-
     val opened = trash.firstOrNull { it.id == openedId }
     if (opened != null) {
         TrashNoteDetail(
@@ -87,19 +86,19 @@ fun TrashScreen(
     if (pendingPurge != null) {
         AlertDialog(
             onDismissRequest = { pendingPurge = null },
-            title = { Text("Eliminar definitivamente") },
-            text = { Text("¿Borrar \"${pendingPurge?.title}\" para siempre?") },
+            title = { Text(stringResource(R.string.purge_dialog_title)) },
+            text = { Text(stringResource(R.string.confirm_purge, pendingPurge?.title ?: "")) },
             confirmButton = {
                 TextButton(onClick = {
                     pendingPurge?.let { onPurge(it.id) }
                     pendingPurge = null
                 }) {
-                    Text("Eliminar")
+                    Text(stringResource(R.string.delete))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { pendingPurge = null }) {
-                    Text("Cancelar")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
@@ -108,16 +107,16 @@ fun TrashScreen(
     if (confirmEmpty) {
         AlertDialog(
             onDismissRequest = { confirmEmpty = false },
-            title = { Text("Vaciar papelera") },
-            text = { Text("¿Eliminar para siempre las ${trash.size} notas?") },
+            title = { Text(stringResource(R.string.empty_trash_dialog_title)) },
+            text = { Text(pluralStringResource(R.plurals.confirm_empty_count, trash.size, trash.size)) },
             confirmButton = {
                 TextButton(onClick = { confirmEmpty = false; onEmpty() }) {
-                    Text("Vaciar")
+                    Text(stringResource(R.string.empty_trash_action))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { confirmEmpty = false }) {
-                    Text("Cancelar")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
@@ -126,10 +125,10 @@ fun TrashScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Papelera") },
+                title = { Text(stringResource(R.string.trash_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Volver")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
                 actions = {
@@ -137,7 +136,7 @@ fun TrashScreen(
                         onClick = { confirmEmpty = true },
                         enabled = trash.isNotEmpty()
                     ) {
-                        Text("Vaciar")
+                        Text(stringResource(R.string.empty_trash_action))
                     }
                 }
             )
@@ -171,17 +170,21 @@ fun TrashScreen(
                 ) { empty ->
                     if (empty) {
                         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            Text("Papelera vacía")
+                            Text(
+                                stringResource(R.string.empty_trash),
+                                style = BodyLargeEmphasized
+                            )
                         }
                     } else {
                         LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
                             items(trash, key = { it.id }) { note ->
                             ElevatedCard(
-                                Modifier
+                                onClick = { openedId = note.id },
+                                modifier = Modifier
                                     .animateItem()
                                     .fillMaxWidth()
-                                    .padding(vertical = 4.dp)
-                                    .clickable { openedId = note.id }
+                                    .padding(vertical = 4.dp),
+                                shape = AppShapes.largeIncreased
                             ) {
                                 Row(
                                     Modifier.padding(12.dp),
@@ -193,10 +196,10 @@ fun TrashScreen(
                                         modifier = Modifier.weight(1f)
                                     )
                                     TextButton(onClick = { onRestore(note.id) }) {
-                                        Text("Restaurar")
+                                        Text(stringResource(R.string.restore))
                                     }
                                     IconButton(onClick = { pendingPurge = note }) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "Eliminar")
+                                        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete))
                                     }
                                 }
                             }
@@ -229,16 +232,16 @@ private fun TrashNoteDetail(
     if (confirmPurge) {
         AlertDialog(
             onDismissRequest = { confirmPurge = false },
-            title = { Text("Eliminar definitivamente") },
-            text = { Text("¿Borrar \"${note.title}\" para siempre?") },
+            title = { Text(stringResource(R.string.purge_dialog_title)) },
+            text = { Text(stringResource(R.string.confirm_purge, note.title)) },
             confirmButton = {
                 TextButton(onClick = { confirmPurge = false; onPurge() }) {
-                    Text("Eliminar")
+                    Text(stringResource(R.string.delete))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { confirmPurge = false }) {
-                    Text("Cancelar")
+                    Text(stringResource(R.string.cancel))
                 }
             }
         )
@@ -247,18 +250,23 @@ private fun TrashNoteDetail(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(note.title) },
+                title = {
+                    Text(
+                        note.title,
+                        style = TitleLargeEmphasized
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Filled.ArrowBack, contentDescription = "Volver")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
                     }
                 },
                 actions = {
                     TextButton(onClick = onRestore) {
-                        Text("Restaurar")
+                        Text(stringResource(R.string.restore))
                     }
                     IconButton(onClick = { confirmPurge = true }) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Eliminar")
+                        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete))
                     }
                 }
             )
@@ -277,10 +285,19 @@ private fun TrashNoteDetail(
                     .padding(12.dp)
             ) {
                 SelectionContainer {
-                    Text(
-                        note.content.ifBlank { "(sin contenido)" },
-                        style = MaterialTheme.typography.bodyLarge
-                    )
+                    // Emphasize only the empty placeholder; real content must
+                    // stay regular so it never competes with the title.
+                    if (note.content.isBlank()) {
+                        Text(
+                            stringResource(R.string.no_content_placeholder),
+                            style = BodyLargeEmphasized
+                        )
+                    } else {
+                        Text(
+                            note.content,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
                 }
                 if (note.tags.isNotEmpty()) {
                     Spacer(Modifier.height(12.dp))
