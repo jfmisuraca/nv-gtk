@@ -159,9 +159,15 @@ theme lacks are aliased to the theme's nearest defined hue — never to another 
     fallback below). Evidence: `./gradlew :app:assembleDebug` (from `android/`) -> BUILD
     SUCCESSFUL in 27s. No unit test added — mapping/persistence tests land in T11; not yet
     wired into `MainActivity` (T9/T10).
-- [ ] T8 **Android persistence** — a `SharedPreferences`-backed theme preference (no new
+- [x] T8 **Android persistence** — a `SharedPreferences`-backed theme preference (no new
   dependency). Default is `Wallpaper`, which resolves to Catppuccin below API 31 — preserving
   today's effective behavior.
+  - **Done:** `android/app/src/main/java/ar/com/nvgtk/ThemePrefs.kt` (NEW): `ThemePrefs`
+    object with `PREFS_NAME = "nv_gtk_prefs"`, `KEY_THEME = "theme"`, `load` (missing key ->
+    `Wallpaper`; unknown id -> `NvTheme.fromPersisted` Catppuccin fallback) and `save`
+    (`putString(...).apply()`). No DataStore/Room dependency added. Not yet wired into
+    `MainActivity` (T9/T10). Evidence: `./gradlew :app:assembleDebug` (from `android/`) ->
+    BUILD SUCCESSFUL. No unit test added — mapping/persistence tests land in T11.
 - [ ] T9 **Android picker UI** — a `SettingsScreen` on a new `settings` route reachable from the
   notes list top bar; `strings.xml` additions in Rioplatense Spanish; a11y semantics as in T7 of
   the M3 Expressive plan.
