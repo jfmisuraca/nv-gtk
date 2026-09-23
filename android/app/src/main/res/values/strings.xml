@@ -47,4 +47,13 @@
     </plurals>
     <string name="cancel">Cancelar</string>
     <string name="no_content_placeholder">(sin contenido)</string>
+
+    <!-- Settings screen (theme picker) -->
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_action">Ajustes</string>
+    <string name="theme_section_title">Tema</string>
+    <string name="theme_catppuccin">Catppuccin</string>
+    <string name="theme_dracula">Drácula</string>
+    <string name="theme_flexoki">Flexoki</string>
+    <string name="theme_wallpaper">Papel tapiz</string>
 </resources>
