@@ -74,18 +74,27 @@ derive it deterministically by blending `base` toward `text` at fixed documented
 theme lacks are aliased to the theme's nearest defined hue — never to another theme's colors.
 
 ## Tasks
-- [ ] T1 **Desktop palette module** — `src/palettes.rs` (NEW): `ThemeId`
+- [x] T1 **Desktop palette module** — `src/palettes.rs` (NEW): `ThemeId`
   (`Catppuccin`/`Dracula`/`Flexoki`/`Wallpaper`), `Variant` (`Light`/`Dark`), a `Palette` struct
   holding the neutral + accent slots above, and the authoritative tables for the three named
   themes. `ThemeId::parse` / `as_str` for persistence. Tests: every named theme defines every
   required slot in both variants; all values parse as `#rrggbb`; `text` vs `base` contrast
   >= 4.5:1 per theme/variant (WCAG AA, per the Dracula spec's own bar).
-- [ ] T2 **Desktop CSS generator + live apply** — refactor `src/theme.rs` so the 37 libadwaita
+  - **Done (1fa4a33):** `src/palettes.rs` (421 lines). Evidence: `xvfb-run -a cargo test -p
+    nv-gtk --bin nv-gtk` -> palettes::tests 5/5 ok (slot completeness in both variants,
+    lowercase `#rrggbb`, WCAG AA text/base contrast, `ThemeId` round-trip, `Wallpaper` ->
+    Catppuccin fallback).
+- [x] T2 **Desktop CSS generator + live apply** — refactor `src/theme.rs` so the 37 libadwaita
   variables are generated from a `Palette` instead of the hardcoded constant, preserving the
   `@media (prefers-color-scheme)` structure and the GTK>=4.20 provider binding. Change
   `theme::load` to return a retained `gtk4::CssProvider` handle plus `theme::apply(&provider,
   theme_id)` so the palette can change at runtime without restarting. `verify-theme.sh` must
   still pass for Catppuccin.
+  - **Done (1fa4a33):** `src/theme.rs` (367 lines) generates the 22 slots + 39 aliases per
+    `@media` block from a `Palette`; `ThemeHandle::apply` re-targets the provider at runtime.
+    Evidence: theme::tests 2/2 ok + `sh scripts/verify-theme.sh` -> PASS light `#EFF1F5` /
+    dark `#1E1E2E` / alias parity 37 / autocomplete aliases resolve. (`%%TOKEN%%` +
+    `String::replace` keeps the literal `@define-color` lines the script greps.)
 - [ ] T3 **Desktop pywal source** — read `~/.cache/wal/colors.json`
   (`special.background`, `special.foreground`, `colors.color0..15`; fall back to the
   `~/.cache/wal/colors` 16-line file). Map to a `Palette` with the documented blend rule.
@@ -142,6 +151,16 @@ separate writer sequences; never two writers in the same worktree at once.
 delivery strategy applies before the first pull request: `ask-on-risk` -> ask once whether to
 split into chained PRs (`stacked-to-main` or `feature-branch-chain`) or proceed with an explicit
 `size:exception`. Work-unit commits on the feature branch are not gated by this.
+
+**Delivery decision (2026-09-22):** strategy `ask-on-risk` resolved to **`stacked-to-main`** —
+chained PRs, each merging to `main` in order. Slice boundaries are recorded here as they are cut;
+work-unit commits on `feature/theme-palettes` are not gated by the budget.
+
+**Review status:** `gentle-ai review assess` on `eb97911..HEAD` reports `risk: medium`,
+`review_due: true`, `review_due_reason: slice_budget_reached` (855 changed lines). The preflight
+with `--base-ref --committed-only` resolves to a START with `--consent=relay`, so a review is
+available for this range (the earlier `immutable_review_transport_unsupported` refusal applies to
+the selectorless/workspace path, not to this one).
 
 ## Open risks
 - Adding a header bar visibly changes the desktop window chrome (T5). Veto-able.
