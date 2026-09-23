@@ -1,5 +1,6 @@
 mod app_state;
 mod palettes;
+mod pywal;
 mod theme;
 mod wiki_autocomplete;
 mod wiki_link;
