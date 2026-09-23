@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -61,6 +62,7 @@ fun NotesListScreen(
     onOpen: (String) -> Unit,
     onQueryChange: (String) -> Unit,
     onTrash: () -> Unit,
+    onSettings: () -> Unit,
     onCreate: () -> Unit,
     windowSizeClass: WindowSizeClass
 ) {
@@ -69,6 +71,9 @@ fun NotesListScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.list_title)) },
                 actions = {
+                    IconButton(onClick = onSettings) {
+                        Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings_action))
+                    }
                     IconButton(onClick = onTrash) {
                         Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.trash_action))
                     }

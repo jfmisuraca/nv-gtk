@@ -168,9 +168,19 @@ theme lacks are aliased to the theme's nearest defined hue — never to another 
     (`putString(...).apply()`). No DataStore/Room dependency added. Not yet wired into
     `MainActivity` (T9/T10). Evidence: `./gradlew :app:assembleDebug` (from `android/`) ->
     BUILD SUCCESSFUL. No unit test added — mapping/persistence tests land in T11.
-- [ ] T9 **Android picker UI** — a `SettingsScreen` on a new `settings` route reachable from the
+- [x] T9 **Android picker UI** — a `SettingsScreen` on a new `settings` route reachable from the
   notes list top bar; `strings.xml` additions in Rioplatense Spanish; a11y semantics as in T7 of
   the M3 Expressive plan.
+  - **Done:** `SettingsScreen.kt` (NEW) lists the four `NvTheme` palettes as a
+    `selectableGroup` of `Role.RadioButton` rows (>= 48dp, TalkBack announces checked state);
+    new `settings` route in `MainActivity`'s NavHost, reachable from a Settings gear in the
+    notes list top bar; theme state hoisted in `setContent` above `MaterialTheme` so
+    `colorSchemeFor(theme, dark)` applies live, persisted via `ThemePrefs.save` on select and
+    loaded once via `ThemePrefs.load`. `strings.xml` additions: `settings_title`/`settings_action`
+    ("Ajustes"), `theme_section_title` ("Tema"), `theme_catppuccin`/`theme_dracula`
+    ("Drácula")/`theme_flexoki`/`theme_wallpaper` ("Papel tapiz"). Evidence: `./gradlew
+    :app:assembleDebug` (from `android/`) -> BUILD SUCCESSFUL in 16s. No unit test added —
+    mapping/persistence tests land in T11.
 - [ ] T10 **Android boot frame** — set the window background from the active palette in
   `onCreate` before `setContent`, so the static day/night XML color in
   `values/themes.xml` / `values-night/themes.xml` never flashes the wrong palette.
