@@ -148,10 +148,17 @@ theme lacks are aliased to the theme's nearest defined hue — never to another 
     info-only (SC2016/SC2013, both false positives), `cargo test -p nv_core` -> 34/34,
     `xvfb-run -a cargo test -p nv-gtk --bin nv-gtk` -> 20/20, `sh scripts/verify-theme.sh`
     -> 10/10 PASS (6 matrix + 2 pywal + alias parity + autocomplete).
-- [ ] T7 **Android palettes** — `ThemePalettes.kt` (NEW): Dracula/Alucard and Flexoki light/dark
+- [x] T7 **Android palettes** — `ThemePalettes.kt` (NEW): Dracula/Alucard and Flexoki light/dark
   `ColorScheme`s mapped onto the same Material 3 roles `CatppuccinTheme.kt` already uses, an
   `NvTheme` enum, and `colorSchemeFor(theme, dark, context)` returning the dynamic scheme for
   `Wallpaper` on API >= 31.
+  - **Done:** `android/app/src/main/java/ar/com/nvgtk/ThemePalettes.kt` (NEW):
+    `DraculaDarkColors`/`DraculaLightColors` (Alucard), `FlexokiDarkColors`/`FlexokiLightColors`,
+    `NvTheme` enum with desktop-matching ids + `fromPersisted` (Catppuccin fallback), and a
+    `@Composable colorSchemeFor` (dynamic scheme for `Wallpaper` on API >= 31, Catppuccin
+    fallback below). Evidence: `./gradlew :app:assembleDebug` (from `android/`) -> BUILD
+    SUCCESSFUL in 27s. No unit test added — mapping/persistence tests land in T11; not yet
+    wired into `MainActivity` (T9/T10).
 - [ ] T8 **Android persistence** — a `SharedPreferences`-backed theme preference (no new
   dependency). Default is `Wallpaper`, which resolves to Catppuccin below API 31 — preserving
   today's effective behavior.
