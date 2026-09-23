@@ -95,11 +95,19 @@ theme lacks are aliased to the theme's nearest defined hue — never to another 
     Evidence: theme::tests 2/2 ok + `sh scripts/verify-theme.sh` -> PASS light `#EFF1F5` /
     dark `#1E1E2E` / alias parity 37 / autocomplete aliases resolve. (`%%TOKEN%%` +
     `String::replace` keeps the literal `@define-color` lines the script greps.)
-- [ ] T3 **Desktop pywal source** — read `~/.cache/wal/colors.json`
+- [x] T3 **Desktop pywal source** — read `~/.cache/wal/colors.json`
   (`special.background`, `special.foreground`, `colors.color0..15`; fall back to the
   `~/.cache/wal/colors` 16-line file). Map to a `Palette` with the documented blend rule.
   Missing, malformed or partial input returns `None`; the caller falls back to Catppuccin.
   Tests over fixture JSON, including a missing-file case.
+  - **Done (8e658f1):** `src/pywal.rs` (343 lines) exposes `load`/`load_from_dir`. Parsing is
+    schema-specific by design — no JSON dependency and no `regex`, because the authorized scope
+    forbids new runtime dependencies — and all-or-nothing. `Palette` fields became
+    `Cow<'static, str>` (`borrowed()` keeps the five named-theme tables `const`) so pywal can
+    return owned colors through the same struct; no hex value changed. Fixtures live under
+    `tests/fixtures/`. Evidence: `xvfb-run -a cargo test -p nv-gtk --bin nv-gtk` -> 15/15 ok
+    (6 new pywal tests), `cargo check --workspace` clean, `sh scripts/verify-theme.sh` PASS.
+    Not wired into the picker yet; that is T5.
 - [ ] T4 **Desktop persistence** — add the theme field to `nv_core::Config` with
   `#[serde(default)]` so an existing `~/.config/nv-gtk/config.json` without it still loads
   (backward compatibility), and update the `Config` struct literal at `nv-core/src/ffi.rs:111`.
@@ -191,6 +199,19 @@ full restart was required before the review could resume.
 | R3-003 | SUGGESTION | `src/palettes.rs:396-411` | `wallpaper_resolves_to_catppuccin_fallback` is tautological — both themes share the match arm, so the assertion cannot fail. |
 | R3-004 | SUGGESTION | `src/theme.rs:313-335` | Latte/Mocha bases are asserted as whole-CSS substrings, not per `@media` block, so a light/dark transposition would pass. |
 | R3-005 | SUGGESTION | `src/palettes.rs:162-178` | Contrast is only asserted for `text`/`base` of the three named themes; `Wallpaper` and every other rendered pair are unproven. |
+
+**Review status — T3 pywal source (2026-09-22, lineage `review-ac151797c1439375`): completed —
+approved.** Consented at `risk: medium` over 10 paths / 886 changed lines, one lens
+(`review-reliability`); the acknowledgement was consumed (`authority: burned`) and no correction
+was opened. Non-blocking findings, all separate later work:
+
+| ID | Severity | Location | Finding |
+| --- | --- | --- | --- |
+| R3-COLORFILE-SYNTAX | WARNING | `src/pywal.rs:118-126` | The `colors` fallback accepts any line that validates as `#rrggbb` and rejects a CRLF-terminated file wholesale as "partial". |
+| R3-HOME-UNSET-SILENT-NONE | SUGGESTION | `src/pywal.rs:62-79` | `load()` conflates "no HOME/XDG_CACHE_HOME" with "no pywal output"; both surface as `None`. |
+| R3-LINE-SCAN-SCOPE | SUGGESTION | `src/pywal.rs:92-101` | `extract_hex` scans the whole document rather than the `special`/`colors` objects, so the schema-specific contract is documented but not enforced. |
+| R3-MISSING-BOUNDARY-TESTS | SUGGESTION | `src/pywal.rs:183-213` | No test pins a single missing required key, a `colors` file with 15/17 lines, or a non-hex `foreground`. |
+| R3-NO-CONTRAST-GATE | SUGGESTION | `src/pywal.rs:41-50` | The derived pywal palette is accepted without a contrast assertion; the low-contrast risk stays documented but unpinned. |
 
 ## Open risks
 - Adding a header bar visibly changes the desktop window chrome (T5). Veto-able.
