@@ -95,24 +95,59 @@ theme lacks are aliased to the theme's nearest defined hue — never to another 
     Evidence: theme::tests 2/2 ok + `sh scripts/verify-theme.sh` -> PASS light `#EFF1F5` /
     dark `#1E1E2E` / alias parity 37 / autocomplete aliases resolve. (`%%TOKEN%%` +
     `String::replace` keeps the literal `@define-color` lines the script greps.)
-- [ ] T3 **Desktop pywal source** — read `~/.cache/wal/colors.json`
+- [x] T3 **Desktop pywal source** — read `~/.cache/wal/colors.json`
   (`special.background`, `special.foreground`, `colors.color0..15`; fall back to the
   `~/.cache/wal/colors` 16-line file). Map to a `Palette` with the documented blend rule.
   Missing, malformed or partial input returns `None`; the caller falls back to Catppuccin.
   Tests over fixture JSON, including a missing-file case.
-- [ ] T4 **Desktop persistence** — add the theme field to `nv_core::Config` with
+  - **Done (8e658f1):** `src/pywal.rs` (343 lines) exposes `load`/`load_from_dir`. Parsing is
+    schema-specific by design — no JSON dependency and no `regex`, because the authorized scope
+    forbids new runtime dependencies — and all-or-nothing. `Palette` fields became
+    `Cow<'static, str>` (`borrowed()` keeps the five named-theme tables `const`) so pywal can
+    return owned colors through the same struct; no hex value changed. Fixtures live under
+    `tests/fixtures/`. Evidence: `xvfb-run -a cargo test -p nv-gtk --bin nv-gtk` -> 15/15 ok
+    (6 new pywal tests), `cargo check --workspace` clean, `sh scripts/verify-theme.sh` PASS.
+    Not wired into the picker yet; that is T5.
+- [x] T4 **Desktop persistence** — add the theme field to `nv_core::Config` with
   `#[serde(default)]` so an existing `~/.config/nv-gtk/config.json` without it still loads
   (backward compatibility), and update the `Config` struct literal at `nv-core/src/ffi.rs:111`.
   Tests: round-trip and legacy-file load.
-- [ ] T5 **Desktop picker UI** — install an `adw::HeaderBar` on the `ApplicationWindow` with a
-  menu button whose popover lists the four themes as radio items; selection applies the palette
-  immediately and persists it. **Flagged decision:** this changes the window chrome from the
-  plain titlebar to a libadwaita header bar.
-- [ ] T6 **Desktop verification** — extend `scripts/verify-theme.sh` to assert rendered pixels
+  - **Done (f4fd48a):** `Config::theme: String` with `#[serde(default = "default_theme")]`
+    (`"catppuccin"`), so both a legacy file and a fresh config resolve to today's effective
+    theme. `nv-core` stores the id opaquely; the UI layer validates it (`ThemeId::parse`,
+    unknown -> Catppuccin). **Scope correction:** there were **three** `Config` literals, not
+    the one this plan predicted — `ffi.rs` plus two in the `storage.rs` test module; all three
+    now use `..Config::default()`. Evidence: `cargo test -p nv_core` -> 34/34 (5 new serde-level
+    tests, no filesystem access), `cargo check --workspace` clean, `xvfb-run -a cargo test -p
+    nv-gtk --bin nv-gtk` 15/15. Assess: medium risk, `review_due_reason: under_budget` — the
+    change joins the slice accumulating from `ead875e` and is reviewed when it crosses budget.
+- [x] T5 **Desktop picker UI** — **the plan's `adw::HeaderBar` is VETOED** (user decision,
+  2026-09-22): the window chrome must not change. Translated onto the existing status footer
+  instead of new chrome: a `MenuButton` at the right edge of the footer row whose popover lists
+  the four themes as grouped radio items, opened by click or `Ctrl+P`, labelled with the active
+  theme's `display_name()`. Selection calls `ThemeHandle::apply` live and persists it.
+  - **Done (c2acb6f):** `ThemeId::display_name` (presentation only; `Wallpaper` reads "Papel
+    tapiz" in the Spanish UI) and `ThemeId::from_persisted` (parse + Catppuccin fallback);
+    `theme::load(display, theme)` no longer hardcodes Catppuccin; `resolve_palettes_with`
+    injects the pywal palette for `Wallpaper` and uses the **same** palette in both `@media`
+    blocks — a wallpaper-derived theme is defined by the wallpaper, not by the OS light/dark
+    switch. Evidence: `xvfb-run -a cargo test -p nv-gtk --bin nv-gtk` -> 20/20 (5 new pure
+    tests), `cargo test -p nv_core` 34/34, `cargo check --workspace` warning-free,
+    `sh scripts/verify-theme.sh` 4/4 PASS. No header bar, menubar or toolbar added; every hex
+    value unchanged. Assess: `under_budget`, joins the slice accumulating from `ead875e`.
+- [x] T6 **Desktop verification** — extend `scripts/verify-theme.sh` to assert rendered pixels
   per theme and variant (Dracula `#282A36`, Alucard `#FFFBEB`, Flexoki `#100F0F`/`#FFFCF0`,
   Catppuccin `#1E1E2E`/`#EFF1F5`), reusing the `GSETTINGS_BACKEND=keyfile` +
   `ADW_DISABLE_PORTAL=1` isolation already documented in `odd/tasks/catppuccin-theme.md`, plus
   one pywal-fixture run.
+  - **Done:** `scripts/verify-theme.sh` (195 lines) asserts the theme x variant matrix
+    (Catppuccin/Dracula/Flexoki x light/dark, background + mantle surface per case) plus
+    pywal light/dark runs proving the wallpaper theme ignores the OS variant, keeping the
+    alias-parity and autocomplete-alias checks. All expected hexes verified verbatim against
+    the `src/palettes.rs` tables — no mismatch. Evidence: `sh -n` clean, shellcheck
+    info-only (SC2016/SC2013, both false positives), `cargo test -p nv_core` -> 34/34,
+    `xvfb-run -a cargo test -p nv-gtk --bin nv-gtk` -> 20/20, `sh scripts/verify-theme.sh`
+    -> 10/10 PASS (6 matrix + 2 pywal + alias parity + autocomplete).
 - [ ] T7 **Android palettes** — `ThemePalettes.kt` (NEW): Dracula/Alucard and Flexoki light/dark
   `ColorScheme`s mapped onto the same Material 3 roles `CatppuccinTheme.kt` already uses, an
   `NvTheme` enum, and `colorSchemeFor(theme, dark, context)` returning the dynamic scheme for
@@ -192,8 +227,24 @@ full restart was required before the review could resume.
 | R3-004 | SUGGESTION | `src/theme.rs:313-335` | Latte/Mocha bases are asserted as whole-CSS substrings, not per `@media` block, so a light/dark transposition would pass. |
 | R3-005 | SUGGESTION | `src/palettes.rs:162-178` | Contrast is only asserted for `text`/`base` of the three named themes; `Wallpaper` and every other rendered pair are unproven. |
 
+**Review status — T3 pywal source (2026-09-22, lineage `review-ac151797c1439375`): completed —
+approved.** Consented at `risk: medium` over 10 paths / 886 changed lines, one lens
+(`review-reliability`); the acknowledgement was consumed (`authority: burned`) and no correction
+was opened. Non-blocking findings, all separate later work:
+
+| ID | Severity | Location | Finding |
+| --- | --- | --- | --- |
+| R3-COLORFILE-SYNTAX | WARNING | `src/pywal.rs:118-126` | The `colors` fallback accepts any line that validates as `#rrggbb` and rejects a CRLF-terminated file wholesale as "partial". |
+| R3-HOME-UNSET-SILENT-NONE | SUGGESTION | `src/pywal.rs:62-79` | `load()` conflates "no HOME/XDG_CACHE_HOME" with "no pywal output"; both surface as `None`. |
+| R3-LINE-SCAN-SCOPE | SUGGESTION | `src/pywal.rs:92-101` | `extract_hex` scans the whole document rather than the `special`/`colors` objects, so the schema-specific contract is documented but not enforced. |
+| R3-MISSING-BOUNDARY-TESTS | SUGGESTION | `src/pywal.rs:183-213` | No test pins a single missing required key, a `colors` file with 15/17 lines, or a non-hex `foreground`. |
+| R3-NO-CONTRAST-GATE | SUGGESTION | `src/pywal.rs:41-50` | The derived pywal palette is accepted without a contrast assertion; the low-contrast risk stays documented but unpinned. |
+
 ## Open risks
-- Adding a header bar visibly changes the desktop window chrome (T5). Veto-able.
+- ~~Adding a header bar visibly changes the desktop window chrome (T5). Veto-able.~~ **Resolved
+  2026-09-22: vetoed.** The picker lives in the existing status footer, so the window chrome is
+  unchanged; the trade-off is that the control sits inside the content area instead of the title
+  bar.
 - pywal palettes are arbitrary; the blend rule can produce low-contrast pairs. T1's contrast
   test covers the named themes; pywal gets a structural check plus a documented fallback.
 - Android has no persistence layer today, so T8 introduces the first one; keep it minimal.

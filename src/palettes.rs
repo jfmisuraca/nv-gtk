@@ -13,12 +13,9 @@
 //! Accent slots the theme lacks are aliased to that theme's nearest defined
 //! hue; no slot ever borrows another theme's colors.
 
+use std::borrow::Cow;
+
 /// A user-selectable desktop palette.
-///
-/// `Dracula`, `Flexoki` and `Wallpaper` are resolved options from T1 onward;
-/// the pywal source (T3) and the picker wiring (T5) construct them later, which
-/// is why the whole vocabulary is declared now.
-#[allow(dead_code)] // consumed by T3 (pywal) and T5 (picker), not by this task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeId {
     Catppuccin,
@@ -27,7 +24,6 @@ pub enum ThemeId {
     Wallpaper,
 }
 
-#[allow(dead_code)] // `parse`/`as_str` back the persistence layer added in T4.
 impl ThemeId {
     /// Parses the persisted lowercase identifier, or `None` for anything else.
     pub fn parse(s: &str) -> Option<Self> {
@@ -49,6 +45,25 @@ impl ThemeId {
             Self::Wallpaper => "wallpaper",
         }
     }
+
+    /// The user-facing label shown in the theme picker. Brand names stay
+    /// verbatim; only the descriptive `Wallpaper` id is translated, because
+    /// the whole UI is Spanish. Presentation only — persistence keeps using
+    /// [`as_str`](Self::as_str).
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Catppuccin => "Catppuccin",
+            Self::Dracula => "Dracula",
+            Self::Flexoki => "Flexoki",
+            Self::Wallpaper => "Papel tapiz",
+        }
+    }
+
+    /// Parses the stored id, falling back to today's default (Catppuccin) for
+    /// anything unknown — the single place for "stored id -> active theme".
+    pub fn from_persisted(s: &str) -> Self {
+        Self::parse(s).unwrap_or(Self::Catppuccin)
+    }
 }
 
 /// The light/dark rendering of a palette.
@@ -63,82 +78,92 @@ pub enum Variant {
 /// `mantle`, `crust`, `surface0..2`, `overlay0..2`, `subtext0..1`, `text`)
 /// and the 10 accents (`lavender`, `blue`, `mauve`, `red`, `green`, `yellow`,
 /// `teal`, `sky`, `pink`, `peach`).
-#[derive(Debug, Clone, Copy)]
+///
+/// Slots are `Cow<'static, str>` rather than `&'static str` so the pywal source
+/// (T3) can return runtime-derived colors through this same struct; the named
+/// themes below stay `const` by wrapping their literals in [`borrowed`].
+#[derive(Debug, Clone)]
 pub struct Palette {
-    pub base: &'static str,
-    pub mantle: &'static str,
-    pub crust: &'static str,
-    pub surface0: &'static str,
-    pub surface1: &'static str,
-    pub surface2: &'static str,
-    pub overlay0: &'static str,
-    pub overlay1: &'static str,
-    pub overlay2: &'static str,
-    pub subtext0: &'static str,
-    pub subtext1: &'static str,
-    pub text: &'static str,
-    pub lavender: &'static str,
-    pub blue: &'static str,
-    pub mauve: &'static str,
-    pub red: &'static str,
-    pub green: &'static str,
-    pub yellow: &'static str,
-    pub teal: &'static str,
-    pub sky: &'static str,
-    pub pink: &'static str,
-    pub peach: &'static str,
+    pub base: Cow<'static, str>,
+    pub mantle: Cow<'static, str>,
+    pub crust: Cow<'static, str>,
+    pub surface0: Cow<'static, str>,
+    pub surface1: Cow<'static, str>,
+    pub surface2: Cow<'static, str>,
+    pub overlay0: Cow<'static, str>,
+    pub overlay1: Cow<'static, str>,
+    pub overlay2: Cow<'static, str>,
+    pub subtext0: Cow<'static, str>,
+    pub subtext1: Cow<'static, str>,
+    pub text: Cow<'static, str>,
+    pub lavender: Cow<'static, str>,
+    pub blue: Cow<'static, str>,
+    pub mauve: Cow<'static, str>,
+    pub red: Cow<'static, str>,
+    pub green: Cow<'static, str>,
+    pub yellow: Cow<'static, str>,
+    pub teal: Cow<'static, str>,
+    pub sky: Cow<'static, str>,
+    pub pink: Cow<'static, str>,
+    pub peach: Cow<'static, str>,
+}
+
+/// Wraps a hex literal so the named-theme tables stay `const` while `Palette`
+/// holds `Cow<'static, str>` for the runtime-derived pywal colors.
+const fn borrowed(s: &'static str) -> Cow<'static, str> {
+    Cow::Borrowed(s)
 }
 
 /// Catppuccin Latte (light), verbatim from the original stylesheet.
 const CATPPUCCIN_LATTE: Palette = Palette {
-    base: "#eff1f5",
-    mantle: "#e6e9ef",
-    crust: "#dce0e8",
-    surface0: "#ccd0da",
-    surface1: "#bcc0cc",
-    surface2: "#acb0be",
-    overlay0: "#9ca0b0",
-    overlay1: "#8c8fa1",
-    overlay2: "#7c7f93",
-    subtext0: "#6c6f85",
-    subtext1: "#5c5f77",
-    text: "#4c4f69",
-    lavender: "#7287fd",
-    blue: "#1e66f5",
-    mauve: "#8839ef",
-    red: "#d20f39",
-    green: "#40a02b",
-    yellow: "#df8e1d",
-    teal: "#179299",
-    sky: "#04a5e5",
-    pink: "#ea76cb",
-    peach: "#fe640b",
+    base: borrowed("#eff1f5"),
+    mantle: borrowed("#e6e9ef"),
+    crust: borrowed("#dce0e8"),
+    surface0: borrowed("#ccd0da"),
+    surface1: borrowed("#bcc0cc"),
+    surface2: borrowed("#acb0be"),
+    overlay0: borrowed("#9ca0b0"),
+    overlay1: borrowed("#8c8fa1"),
+    overlay2: borrowed("#7c7f93"),
+    subtext0: borrowed("#6c6f85"),
+    subtext1: borrowed("#5c5f77"),
+    text: borrowed("#4c4f69"),
+    lavender: borrowed("#7287fd"),
+    blue: borrowed("#1e66f5"),
+    mauve: borrowed("#8839ef"),
+    red: borrowed("#d20f39"),
+    green: borrowed("#40a02b"),
+    yellow: borrowed("#df8e1d"),
+    teal: borrowed("#179299"),
+    sky: borrowed("#04a5e5"),
+    pink: borrowed("#ea76cb"),
+    peach: borrowed("#fe640b"),
 };
 
 /// Catppuccin Mocha (dark), verbatim from the original stylesheet.
 const CATPPUCCIN_MOCHA: Palette = Palette {
-    base: "#1e1e2e",
-    mantle: "#181825",
-    crust: "#11111b",
-    surface0: "#313244",
-    surface1: "#45475a",
-    surface2: "#585b70",
-    overlay0: "#6c7086",
-    overlay1: "#7f849c",
-    overlay2: "#9399b2",
-    subtext0: "#a6adc8",
-    subtext1: "#bac2de",
-    text: "#cdd6f4",
-    lavender: "#b4befe",
-    blue: "#89b4fa",
-    mauve: "#cba6f7",
-    red: "#f38ba8",
-    green: "#a6e3a1",
-    yellow: "#f9e2af",
-    teal: "#94e2d5",
-    sky: "#89dceb",
-    pink: "#f5c2e7",
-    peach: "#fab387",
+    base: borrowed("#1e1e2e"),
+    mantle: borrowed("#181825"),
+    crust: borrowed("#11111b"),
+    surface0: borrowed("#313244"),
+    surface1: borrowed("#45475a"),
+    surface2: borrowed("#585b70"),
+    overlay0: borrowed("#6c7086"),
+    overlay1: borrowed("#7f849c"),
+    overlay2: borrowed("#9399b2"),
+    subtext0: borrowed("#a6adc8"),
+    subtext1: borrowed("#bac2de"),
+    text: borrowed("#cdd6f4"),
+    lavender: borrowed("#b4befe"),
+    blue: borrowed("#89b4fa"),
+    mauve: borrowed("#cba6f7"),
+    red: borrowed("#f38ba8"),
+    green: borrowed("#a6e3a1"),
+    yellow: borrowed("#f9e2af"),
+    teal: borrowed("#94e2d5"),
+    sky: borrowed("#89dceb"),
+    pink: borrowed("#f5c2e7"),
+    peach: borrowed("#fab387"),
 };
 
 /// Dracula (dark). The spec defines backgrounds, `selection`, `comment`, `fg`
@@ -147,28 +172,28 @@ const CATPPUCCIN_MOCHA: Palette = Palette {
 /// mirroring Catppuccin's own relative elevation curve. Dracula has no blue,
 /// so `blue`/`teal`/`sky` alias `cyan`, and `lavender`/`mauve` alias `purple`.
 const DRACULA: Palette = Palette {
-    base: "#282a36",
-    mantle: "#21222c",
-    crust: "#191a21",
-    surface0: "#343746",
-    surface1: "#424450",
-    surface2: "#44475a",
-    overlay0: "#848589",
-    overlay1: "#9a9b9d",
-    overlay2: "#b3b4b4",
-    subtext0: "#cacbc9",
-    subtext1: "#e1e1dd",
-    text: "#f8f8f2",
-    lavender: "#bd93f9",
-    blue: "#8be9fd",
-    mauve: "#bd93f9",
-    red: "#ff5555",
-    green: "#50fa7b",
-    yellow: "#f1fa8c",
-    teal: "#8be9fd",
-    sky: "#8be9fd",
-    pink: "#ff79c6",
-    peach: "#ffb86c",
+    base: borrowed("#282a36"),
+    mantle: borrowed("#21222c"),
+    crust: borrowed("#191a21"),
+    surface0: borrowed("#343746"),
+    surface1: borrowed("#424450"),
+    surface2: borrowed("#44475a"),
+    overlay0: borrowed("#848589"),
+    overlay1: borrowed("#9a9b9d"),
+    overlay2: borrowed("#b3b4b4"),
+    subtext0: borrowed("#cacbc9"),
+    subtext1: borrowed("#e1e1dd"),
+    text: borrowed("#f8f8f2"),
+    lavender: borrowed("#bd93f9"),
+    blue: borrowed("#8be9fd"),
+    mauve: borrowed("#bd93f9"),
+    red: borrowed("#ff5555"),
+    green: borrowed("#50fa7b"),
+    yellow: borrowed("#f1fa8c"),
+    teal: borrowed("#8be9fd"),
+    sky: borrowed("#8be9fd"),
+    pink: borrowed("#ff79c6"),
+    peach: borrowed("#ffb86c"),
 };
 
 /// Alucard (Dracula light). Same derivation as [`DRACULA`]: the elevation
@@ -176,28 +201,28 @@ const DRACULA: Palette = Palette {
 /// darkens, since `base` is light). No blue in the spec, so `blue`/`teal`/`sky`
 /// alias `cyan` and `lavender`/`mauve` alias `purple`.
 const ALUCARD: Palette = Palette {
-    base: "#fffbeb",
-    mantle: "#efeddc",
-    crust: "#ece9df",
-    surface0: "#dedccf",
-    surface1: "#ceccc0",
-    surface2: "#bcbab3",
-    overlay0: "#9c9a91",
-    overlay1: "#84827b",
-    overlay2: "#696862",
-    subtext0: "#504f4c",
-    subtext1: "#383735",
-    text: "#1f1f1f",
-    lavender: "#644ac9",
-    blue: "#036a96",
-    mauve: "#644ac9",
-    red: "#cb3a2a",
-    green: "#14710a",
-    yellow: "#846e15",
-    teal: "#036a96",
-    sky: "#036a96",
-    pink: "#a3144d",
-    peach: "#a34d14",
+    base: borrowed("#fffbeb"),
+    mantle: borrowed("#efeddc"),
+    crust: borrowed("#ece9df"),
+    surface0: borrowed("#dedccf"),
+    surface1: borrowed("#ceccc0"),
+    surface2: borrowed("#bcbab3"),
+    overlay0: borrowed("#9c9a91"),
+    overlay1: borrowed("#84827b"),
+    overlay2: borrowed("#696862"),
+    subtext0: borrowed("#504f4c"),
+    subtext1: borrowed("#383735"),
+    text: borrowed("#1f1f1f"),
+    lavender: borrowed("#644ac9"),
+    blue: borrowed("#036a96"),
+    mauve: borrowed("#644ac9"),
+    red: borrowed("#cb3a2a"),
+    green: borrowed("#14710a"),
+    yellow: borrowed("#846e15"),
+    teal: borrowed("#036a96"),
+    sky: borrowed("#036a96"),
+    pink: borrowed("#a3144d"),
+    peach: borrowed("#a34d14"),
 };
 
 /// Flexoki dark. The 9-step base ramp supplies the neutrals from `mantle`
@@ -206,28 +231,28 @@ const ALUCARD: Palette = Palette {
 /// `base -> text` at 0.86. The spec names `cyan`/`purple`/`magenta`, mapped
 /// onto the stylesheet's `teal`/`sky`, `lavender`/`mauve` and `pink`.
 const FLEXOKI_DARK: Palette = Palette {
-    base: "#100f0f",
-    mantle: "#1c1b1a",
-    crust: "#282726",
-    surface0: "#343331",
-    surface1: "#403e3c",
-    surface2: "#575653",
-    overlay0: "#6f6e69",
-    overlay1: "#878580",
-    overlay2: "#9f9d96",
-    subtext0: "#b7b5ac",
-    subtext1: "#d2d0c7",
-    text: "#f2f0e5",
-    lavender: "#5e409d",
-    blue: "#205ea6",
-    mauve: "#5e409d",
-    red: "#af3029",
-    green: "#66800b",
-    yellow: "#ad8301",
-    teal: "#24837b",
-    sky: "#24837b",
-    pink: "#a02f6f",
-    peach: "#bc5215",
+    base: borrowed("#100f0f"),
+    mantle: borrowed("#1c1b1a"),
+    crust: borrowed("#282726"),
+    surface0: borrowed("#343331"),
+    surface1: borrowed("#403e3c"),
+    surface2: borrowed("#575653"),
+    overlay0: borrowed("#6f6e69"),
+    overlay1: borrowed("#878580"),
+    overlay2: borrowed("#9f9d96"),
+    subtext0: borrowed("#b7b5ac"),
+    subtext1: borrowed("#d2d0c7"),
+    text: borrowed("#f2f0e5"),
+    lavender: borrowed("#5e409d"),
+    blue: borrowed("#205ea6"),
+    mauve: borrowed("#5e409d"),
+    red: borrowed("#af3029"),
+    green: borrowed("#66800b"),
+    yellow: borrowed("#ad8301"),
+    teal: borrowed("#24837b"),
+    sky: borrowed("#24837b"),
+    pink: borrowed("#a02f6f"),
+    peach: borrowed("#bc5215"),
 };
 
 /// Flexoki light. The 9-step base ramp supplies the neutrals from `mantle`
@@ -235,28 +260,28 @@ const FLEXOKI_DARK: Palette = Palette {
 /// `base -> text` (darkening) at 0.86. Accent aliasing matches
 /// [`FLEXOKI_DARK`].
 const FLEXOKI_LIGHT: Palette = Palette {
-    base: "#fffcf0",
-    mantle: "#f2f0e5",
-    crust: "#e6e4d9",
-    surface0: "#dad8ce",
-    surface1: "#cecdc3",
-    surface2: "#b7b5ac",
-    overlay0: "#9f9d96",
-    overlay1: "#878580",
-    overlay2: "#6f6e69",
-    subtext0: "#575653",
-    subtext1: "#31302e",
-    text: "#100f0f",
-    lavender: "#8b7ec8",
-    blue: "#4385be",
-    mauve: "#8b7ec8",
-    red: "#d14d41",
-    green: "#879a39",
-    yellow: "#d0a215",
-    teal: "#3aa99f",
-    sky: "#3aa99f",
-    pink: "#ce5d97",
-    peach: "#da702c",
+    base: borrowed("#fffcf0"),
+    mantle: borrowed("#f2f0e5"),
+    crust: borrowed("#e6e4d9"),
+    surface0: borrowed("#dad8ce"),
+    surface1: borrowed("#cecdc3"),
+    surface2: borrowed("#b7b5ac"),
+    overlay0: borrowed("#9f9d96"),
+    overlay1: borrowed("#878580"),
+    overlay2: borrowed("#6f6e69"),
+    subtext0: borrowed("#575653"),
+    subtext1: borrowed("#31302e"),
+    text: borrowed("#100f0f"),
+    lavender: borrowed("#8b7ec8"),
+    blue: borrowed("#4385be"),
+    mauve: borrowed("#8b7ec8"),
+    red: borrowed("#d14d41"),
+    green: borrowed("#879a39"),
+    yellow: borrowed("#d0a215"),
+    teal: borrowed("#3aa99f"),
+    sky: borrowed("#3aa99f"),
+    pink: borrowed("#ce5d97"),
+    peach: borrowed("#da702c"),
 };
 
 /// Resolves the palette for a theme and variant.
@@ -286,30 +311,30 @@ mod tests {
     ];
     const BOTH_VARIANTS: [Variant; 2] = [Variant::Light, Variant::Dark];
 
-    fn slots(p: &Palette) -> [(&'static str, &'static str); 22] {
+    fn slots(p: &Palette) -> [(&str, &str); 22] {
         [
-            ("base", p.base),
-            ("mantle", p.mantle),
-            ("crust", p.crust),
-            ("surface0", p.surface0),
-            ("surface1", p.surface1),
-            ("surface2", p.surface2),
-            ("overlay0", p.overlay0),
-            ("overlay1", p.overlay1),
-            ("overlay2", p.overlay2),
-            ("subtext0", p.subtext0),
-            ("subtext1", p.subtext1),
-            ("text", p.text),
-            ("lavender", p.lavender),
-            ("blue", p.blue),
-            ("mauve", p.mauve),
-            ("red", p.red),
-            ("green", p.green),
-            ("yellow", p.yellow),
-            ("teal", p.teal),
-            ("sky", p.sky),
-            ("pink", p.pink),
-            ("peach", p.peach),
+            ("base", p.base.as_ref()),
+            ("mantle", p.mantle.as_ref()),
+            ("crust", p.crust.as_ref()),
+            ("surface0", p.surface0.as_ref()),
+            ("surface1", p.surface1.as_ref()),
+            ("surface2", p.surface2.as_ref()),
+            ("overlay0", p.overlay0.as_ref()),
+            ("overlay1", p.overlay1.as_ref()),
+            ("overlay2", p.overlay2.as_ref()),
+            ("subtext0", p.subtext0.as_ref()),
+            ("subtext1", p.subtext1.as_ref()),
+            ("text", p.text.as_ref()),
+            ("lavender", p.lavender.as_ref()),
+            ("blue", p.blue.as_ref()),
+            ("mauve", p.mauve.as_ref()),
+            ("red", p.red.as_ref()),
+            ("green", p.green.as_ref()),
+            ("yellow", p.yellow.as_ref()),
+            ("teal", p.teal.as_ref()),
+            ("sky", p.sky.as_ref()),
+            ("pink", p.pink.as_ref()),
+            ("peach", p.peach.as_ref()),
         ]
     }
 
@@ -387,7 +412,7 @@ mod tests {
         for theme in [ThemeId::Catppuccin, ThemeId::Dracula, ThemeId::Flexoki] {
             for variant in BOTH_VARIANTS {
                 let p = palette(theme, variant);
-                let ratio = contrast_ratio(p.text, p.base);
+                let ratio = contrast_ratio(&p.text, &p.base);
                 assert!(
                     ratio >= 4.5,
                     "{} {variant:?}: text/base contrast {ratio:.2} is below the 4.5:1 WCAG AA bar",
@@ -416,6 +441,33 @@ mod tests {
             for ((name, a), (_, b)) in slots(&wallpaper).iter().zip(slots(&catppuccin)) {
                 assert_eq!(a, &b, "wallpaper slot {name} diverged from the Catppuccin fallback");
             }
+        }
+    }
+
+    #[test]
+    fn display_names_are_non_empty_and_distinct() {
+        let names: Vec<&str> = ALL_THEMES.iter().map(|theme| theme.display_name()).collect();
+        for name in &names {
+            assert!(!name.is_empty(), "display name must not be empty");
+        }
+        for (i, a) in names.iter().enumerate() {
+            for b in &names[i + 1..] {
+                assert_ne!(a, b, "display names must be pairwise distinct");
+            }
+        }
+    }
+
+    #[test]
+    fn from_persisted_maps_valid_ids_and_falls_back_to_catppuccin() {
+        for theme in ALL_THEMES {
+            assert_eq!(ThemeId::from_persisted(theme.as_str()), theme);
+        }
+        for garbage in ["", "solarized", "Catppuccin", "dracula "] {
+            assert_eq!(
+                ThemeId::from_persisted(garbage),
+                ThemeId::Catppuccin,
+                "from_persisted({garbage:?}) must fall back to Catppuccin"
+            );
         }
     }
 }
