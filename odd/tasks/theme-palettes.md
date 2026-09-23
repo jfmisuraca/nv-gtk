@@ -156,46 +156,41 @@ split into chained PRs (`stacked-to-main` or `feature-branch-chain`) or proceed 
 chained PRs, each merging to `main` in order. Slice boundaries are recorded here as they are cut;
 work-unit commits on `feature/theme-palettes` are not gated by the budget.
 
-**Review status (2026-09-22, lineage `review-4210a1015490bd65`):** the review of `eb97911..HEAD`
-was consented and frozen — `risk: medium`, `review_due_reason: slice_budget_reached`, 874 changed
-lines, one selected lens (`review-reliability`). The transaction is in `reviewing` state with that
-lens slot open.
+**Review status (2026-09-22, lineage `review-9acd31ca1c503867`): completed — approved.**
 
-The lens cannot run on the configured free model: `opencode/muse-spark-1.3-contributor-free` is
-rejected provider-side with `OpenCode's free tier can only be used from within OpenCode` (2/2
-attempts).
+The review of `eb97911..HEAD` was consented and frozen at `risk: medium`
+(`review_due_reason: slice_budget_reached`): 5 changed paths / 909 changed lines, one selected
+lens (`review-reliability`), frozen trees base `3722a1e0` -> candidate `c1a09de8`. The lens
+returned a complete `reviewer/v1` result, the review closed `approved`, and its acknowledgement
+was consumed (`authority: burned`). No correction was opened.
 
-**Root cause (corrected after a wider probe):** the Zen free tier refuses *read-only* requests.
-Same model, same runtime, same parent session:
+**Blocker on the first attempt (and the diagnosis that came before it):** four consecutive lens
+launches produced no valid `reviewer/v1` JSON. On `deepseek/deepseek-flash` every child ended with
+`finish="length"`: it spent its whole output budget on a `reasoning` part (105k-116k chars), three
+emitted no final text and the fourth only a truncated JSON object. DeepSeek has thinking mode
+enabled by default.
 
-| Agent | Tool posture | Free-model result |
-| --- | --- | --- |
-| `general` | bash/edit/write allowed | 83/83 ok + probe `PROBE_OK` |
-| `jd-fix-agent` | full tools | probe `PROBE_OK` |
-| `jd-judge-a` | bash/edit/write denied | 2/2 failed |
-| `review-reliability` | zero tools | 6/6 failed |
+An earlier revision of this section blamed the Zen free tier for refusing *read-only* agents. That
+diagnosis was wrong: the agents had already been moved off free models when the failures were
+diagnosed, and the real cause was output-budget exhaustion, not a provider tier refusal. Neither
+explanation is a Gentle AI defect.
 
-The reviewer agents are read-only by contract, so free Zen models cannot run them. An earlier note
-blamed the review transport's system-prompt isolation; `jd-judge-a` is not transport-bound and
-fails identically, so that explanation was wrong. This is a model-provider rule, not a Gentle AI
-defect.
+**Fix applied:** a scoped non-thinking alias `deepseek/deepseek-flash-nothink` (`reasoning: false`,
+`options.thinking.type = "disabled"`) in `~/.config/opencode/opencode.jsonc`, assigned to the eight
+read-only JSON-emitting agents — the six review-transport roles (`review-risk`,
+`review-readability`, `review-reliability`, `review-resilience`, `review-refuter`,
+`review-validator`) plus `jd-judge-a` and `jd-judge-b`. OpenCode does not hot-reload config, so a
+full restart was required before the review could resume.
 
-**Fix applied:** the six review-transport agents (`review-risk`, `review-readability`,
-`review-reliability`, `review-resilience`, `review-refuter`, `review-validator`) now use
-`deepseek/deepseek-flash` in `~/.config/opencode/opencode.jsonc` (backup:
-`opencode.jsonc.bak-reviewlens-220553`). OpenCode is not hot-reloaded, so a full restart is
-required before the review can complete.
+**Findings — non-blocking, separate later work; they never reopen this candidate:**
 
-**Resume recipe after the restart:**
-
-```sh
-# 1. re-derive the transition for the same committed range (lineage is recomputed by STATUS)
-gentle-ai review assess --cwd /home/francisco/Software/git/nv-gtk --base-ref eb97911 --committed-only --json
-# 2. run next_transition.command, adding --agent=opencode so the collect input carries provider_task
-gentle-ai review status --cwd=/home/francisco/Software/git/nv-gtk --contract=gentle-ai.review-integration/v2 \
-  --next-transition=true --agent=opencode --base-ref=eb97911 --committed-only=true
-# 3. launch the provider_task with subagent_type = provider_task.agent and prompt = provider_task.prompt
-```
+| ID | Severity | Location | Finding |
+| --- | --- | --- | --- |
+| R3-001 | WARNING | `src/theme.rs:288-290` | `load` registers the provider before it holds any CSS, and no test exercises `load`; only the pure `build_css` is asserted. |
+| R3-002 | SUGGESTION | `src/theme.rs:311` | `apply` discards the `load_from_string` outcome; a malformed generated stylesheet would be dropped silently. |
+| R3-003 | SUGGESTION | `src/palettes.rs:396-411` | `wallpaper_resolves_to_catppuccin_fallback` is tautological — both themes share the match arm, so the assertion cannot fail. |
+| R3-004 | SUGGESTION | `src/theme.rs:313-335` | Latte/Mocha bases are asserted as whole-CSS substrings, not per `@media` block, so a light/dark transposition would pass. |
+| R3-005 | SUGGESTION | `src/palettes.rs:162-178` | Contrast is only asserted for `text`/`base` of the three named themes; `Wallpaper` and every other rendered pair are unproven. |
 
 ## Open risks
 - Adding a header bar visibly changes the desktop window chrome (T5). Veto-able.
