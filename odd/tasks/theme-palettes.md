@@ -156,11 +156,34 @@ split into chained PRs (`stacked-to-main` or `feature-branch-chain`) or proceed 
 chained PRs, each merging to `main` in order. Slice boundaries are recorded here as they are cut;
 work-unit commits on `feature/theme-palettes` are not gated by the budget.
 
-**Review status:** `gentle-ai review assess` on `eb97911..HEAD` reports `risk: medium`,
-`review_due: true`, `review_due_reason: slice_budget_reached` (855 changed lines). The preflight
-with `--base-ref --committed-only` resolves to a START with `--consent=relay`, so a review is
-available for this range (the earlier `immutable_review_transport_unsupported` refusal applies to
-the selectorless/workspace path, not to this one).
+**Review status (2026-09-22, lineage `review-4210a1015490bd65`):** the review of `eb97911..HEAD`
+was consented and frozen — `risk: medium`, `review_due_reason: slice_budget_reached`, 874 changed
+lines, one selected lens (`review-reliability`). The transaction is in `reviewing` state with that
+lens slot open.
+
+The lens cannot run on the configured free model: `opencode/muse-spark-1.3-contributor-free` is
+rejected provider-side with `OpenCode's free tier can only be used from within OpenCode` (2/2
+attempts), while the same model succeeds on a non-review Task (`general` probe answered
+`PROBE_OK`). The review transport replaces the child session's system prompt with a one-line
+isolation instruction, which is the only path-level difference; the free-tier gate appears to
+reject that request. This is a model-provider refusal, not a Gentle AI defect.
+
+**Fix applied:** the six review-transport agents (`review-risk`, `review-readability`,
+`review-reliability`, `review-resilience`, `review-refuter`, `review-validator`) now use
+`deepseek/deepseek-flash` in `~/.config/opencode/opencode.jsonc` (backup:
+`opencode.jsonc.bak-reviewlens-220553`). OpenCode is not hot-reloaded, so a full restart is
+required before the review can complete.
+
+**Resume recipe after the restart:**
+
+```sh
+# 1. re-derive the transition for the same committed range (lineage is recomputed by STATUS)
+gentle-ai review assess --cwd /home/francisco/Software/git/nv-gtk --base-ref eb97911 --committed-only --json
+# 2. run next_transition.command, adding --agent=opencode so the collect input carries provider_task
+gentle-ai review status --cwd=/home/francisco/Software/git/nv-gtk --contract=gentle-ai.review-integration/v2 \
+  --next-transition=true --agent=opencode --base-ref=eb97911 --committed-only=true
+# 3. launch the provider_task with subagent_type = provider_task.agent and prompt = provider_task.prompt
+```
 
 ## Open risks
 - Adding a header bar visibly changes the desktop window chrome (T5). Veto-able.
