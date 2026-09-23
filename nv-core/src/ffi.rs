@@ -110,8 +110,7 @@ impl NvStorage {
         fs::create_dir_all(&path).map_err(NvError::from)?;
         let config = Config {
             notes_dir: path,
-            default_extension: "md".to_string(),
-            auto_save_ms: 300,
+            ..Config::default()
         };
         Ok(Arc::new(Self {
             inner: Mutex::new(StorageManager::new(&config)),
