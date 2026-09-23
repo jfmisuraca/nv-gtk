@@ -1,0 +1,27 @@
+{
+    "wallpaper": "file:///home/user/Pictures/both.jpg",
+    "alpha": "100",
+    "special": {
+        "background": "#222222",
+        "foreground": "#EEEEEE",
+        "cursor": "#eeeeee"
+    },
+    "colors": {
+        "color0": "#444444",
+        "color1": "#333333",
+        "color2": "#333333",
+        "color3": "#333333",
+        "color4": "#333333",
+        "color5": "#333333",
+        "color6": "#333333",
+        "color7": "#333333",
+        "color8": "#333333",
+        "color9": "#333333",
+        "color10": "#333333",
+        "color11": "#333333",
+        "color12": "#333333",
+        "color13": "#333333",
+        "color14": "#333333",
+        "color15": "#333333"
+    }
+}
