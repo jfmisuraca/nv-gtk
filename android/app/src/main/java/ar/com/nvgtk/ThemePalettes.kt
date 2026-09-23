@@ -165,7 +165,7 @@ enum class NvTheme(val id: String) {
 /**
  * Resolves the [ColorScheme] for a theme and variant. `Wallpaper` returns the
  * Material You dynamic scheme on API >= 31 and falls back to Catppuccin below
- * it, preserving today's effective behavior there.
+  * it, preserving today's effective behavior there.
  */
 @Composable
 fun colorSchemeFor(theme: NvTheme, dark: Boolean, context: Context = LocalContext.current): ColorScheme =
@@ -181,4 +181,23 @@ fun colorSchemeFor(theme: NvTheme, dark: Boolean, context: Context = LocalContex
             } else {
                 CatppuccinLightColors
             }
+    }
+
+/**
+ * Non-Compose resolver for the boot window background (T10).
+ *
+ * Returns the palette `background` role for a theme and variant, read from
+ * the same [ColorScheme] tables [colorSchemeFor] serves, so the `onCreate`
+ * window background and the first Compose frame always agree. `Wallpaper`
+ * resolves to the Catppuccin fallback: the Material You dynamic roles are
+ * `@Composable` and cannot run before `setContent`, and below API 31
+ * Catppuccin is the effective scheme anyway — matching the static day/night
+ * XML (`values/themes.xml`, `values-night/themes.xml`).
+ */
+fun bootBackground(theme: NvTheme, dark: Boolean): Color =
+    when (theme) {
+        NvTheme.Catppuccin -> if (dark) CatppuccinDarkColors.background else CatppuccinLightColors.background
+        NvTheme.Dracula -> if (dark) DraculaDarkColors.background else DraculaLightColors.background
+        NvTheme.Flexoki -> if (dark) FlexokiDarkColors.background else FlexokiLightColors.background
+        NvTheme.Wallpaper -> if (dark) CatppuccinDarkColors.background else CatppuccinLightColors.background
     }

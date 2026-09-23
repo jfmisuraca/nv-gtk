@@ -1,5 +1,7 @@
 package ar.com.nvgtk
 
+import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -55,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
@@ -94,6 +97,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // T10: paint the window with the active palette's base color before
+        // setContent, so the static day/night XML background never flashes
+        // the wrong palette on boot or day/night recreation.
+        val bootTheme = ThemePrefs.load(this)
+        val bootDark =
+            (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+        window.setBackgroundDrawable(ColorDrawable(bootBackground(bootTheme, bootDark).toArgb()))
         val notesDir = File(filesDir, "notes").apply { mkdirs() }
         storage = NvStorage.open(notesDir.absolutePath)
         setContent {
