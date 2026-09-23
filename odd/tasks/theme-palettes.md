@@ -108,10 +108,19 @@ theme lacks are aliased to the theme's nearest defined hue — never to another 
     `tests/fixtures/`. Evidence: `xvfb-run -a cargo test -p nv-gtk --bin nv-gtk` -> 15/15 ok
     (6 new pywal tests), `cargo check --workspace` clean, `sh scripts/verify-theme.sh` PASS.
     Not wired into the picker yet; that is T5.
-- [ ] T4 **Desktop persistence** — add the theme field to `nv_core::Config` with
+- [x] T4 **Desktop persistence** — add the theme field to `nv_core::Config` with
   `#[serde(default)]` so an existing `~/.config/nv-gtk/config.json` without it still loads
   (backward compatibility), and update the `Config` struct literal at `nv-core/src/ffi.rs:111`.
   Tests: round-trip and legacy-file load.
+  - **Done (f4fd48a):** `Config::theme: String` with `#[serde(default = "default_theme")]`
+    (`"catppuccin"`), so both a legacy file and a fresh config resolve to today's effective
+    theme. `nv-core` stores the id opaquely; the UI layer validates it (`ThemeId::parse`,
+    unknown -> Catppuccin). **Scope correction:** there were **three** `Config` literals, not
+    the one this plan predicted — `ffi.rs` plus two in the `storage.rs` test module; all three
+    now use `..Config::default()`. Evidence: `cargo test -p nv_core` -> 34/34 (5 new serde-level
+    tests, no filesystem access), `cargo check --workspace` clean, `xvfb-run -a cargo test -p
+    nv-gtk --bin nv-gtk` 15/15. Assess: medium risk, `review_due_reason: under_budget` — the
+    change joins the slice accumulating from `ead875e` and is reviewed when it crosses budget.
 - [ ] T5 **Desktop picker UI** — install an `adw::HeaderBar` on the `ApplicationWindow` with a
   menu button whose popover lists the four themes as radio items; selection applies the palette
   immediately and persists it. **Flagged decision:** this changes the window chrome from the
