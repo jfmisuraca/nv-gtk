@@ -60,4 +60,8 @@ dependencies {
 
     // Required by the UniFFI-generated nv_core bindings (JNA direct mapping).
     implementation("net.java.dev.jna:jna:5.15.0@aar")
+
+    // T11: local unit tests for the theme mapping + default-preference
+    // resolution (ThemeMappingTest). Test-only; no runtime dependency added.
+    testImplementation("junit:junit:4.13.2")
 }
