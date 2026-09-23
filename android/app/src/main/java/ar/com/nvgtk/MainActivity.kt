@@ -1,6 +1,7 @@
 package ar.com.nvgtk
 
-import android.os.Build
+import android.content.res.Configuration
+import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -42,8 +43,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -58,6 +57,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
@@ -97,21 +97,35 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        // T10: paint the window with the active palette's base color before
+        // setContent, so the static day/night XML background never flashes
+        // the wrong palette on boot or day/night recreation.
+        val bootTheme = ThemePrefs.load(this)
+        val bootDark =
+            (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+        window.setBackgroundDrawable(ColorDrawable(bootBackground(bootTheme, bootDark).toArgb()))
         val notesDir = File(filesDir, "notes").apply { mkdirs() }
         storage = NvStorage.open(notesDir.absolutePath)
         setContent {
+            // T9: theme choice is hoisted here, above MaterialTheme, so the
+            // selected palette applies live across every route. Persisted via
+            // ThemePrefs (SharedPreferences, no new dependency); default
+            // Wallpaper resolves to Catppuccin below API 31.
+            val context = LocalContext.current
+            var theme by remember { mutableStateOf(ThemePrefs.load(context)) }
             val darkTheme = isSystemInDarkTheme()
-            val colorScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                val context = LocalContext.current
-                if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-            } else if (darkTheme) {
-                CatppuccinDarkColors
-            } else {
-                CatppuccinLightColors
-            }
+            val colorScheme = colorSchemeFor(theme, darkTheme)
             MaterialTheme(colorScheme = colorScheme, typography = AppTypography, shapes = AppShapes) {
                 Surface(Modifier.fillMaxSize()) {
-                    NvApp(storage)
+                    NvApp(
+                        storage,
+                        theme = theme,
+                        onThemeChange = { selected ->
+                            theme = selected
+                            ThemePrefs.save(context, selected)
+                        }
+                    )
                 }
             }
         }
@@ -127,7 +141,11 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-private fun NvApp(storage: NvStorage) {
+private fun NvApp(
+    storage: NvStorage,
+    theme: NvTheme,
+    onThemeChange: (NvTheme) -> Unit
+) {
     val scope = rememberCoroutineScope()
     val newNoteDefaultTitle = stringResource(R.string.new_note_default_title)
     val windowSizeClass = WindowSizeClass.fromWidth(LocalConfiguration.current.screenWidthDp)
@@ -200,6 +218,7 @@ private fun NvApp(storage: NvStorage) {
                 },
                 onQueryChange = { query = it },
                 onTrash = { navController.navigate("trash") },
+                onSettings = { navController.navigate("settings") },
                 onCreate = {
                     // createNote is IO; navigation and Compose state must run
                     // on the main thread (NavController touches the lifecycle).
@@ -249,6 +268,13 @@ private fun NvApp(storage: NvStorage) {
                 onRestore = { id -> ioOp { storage.restoreNote(id) } },
                 onPurge = { id -> ioOp { storage.purgeNote(id) } },
                 onEmpty = { ioOp { storage.emptyTrash() } }
+            )
+        }
+        composable("settings") {
+            SettingsScreen(
+                selected = theme,
+                onSelect = onThemeChange,
+                onBack = { navController.popBackStack() }
             )
         }
     }
