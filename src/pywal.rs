@@ -67,7 +67,6 @@ use crate::palettes::Palette;
 /// That is `$XDG_CACHE_HOME/wal` when `XDG_CACHE_HOME` is set, otherwise
 /// `$HOME/.cache/wal`. Returns `None` when neither variable is set, or when
 /// the directory holds no usable pywal output (see [`load_from_dir`]).
-#[allow(dead_code)] // T5 wires this into the picker; nothing calls it yet.
 pub fn load() -> Option<Palette> {
     let dir = match std::env::var_os("XDG_CACHE_HOME") {
         Some(cache) if !cache.is_empty() => PathBuf::from(cache).join("wal"),

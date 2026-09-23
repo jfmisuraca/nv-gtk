@@ -16,11 +16,6 @@
 use std::borrow::Cow;
 
 /// A user-selectable desktop palette.
-///
-/// `Dracula`, `Flexoki` and `Wallpaper` are resolved options from T1 onward;
-/// the pywal source (T3) and the picker wiring (T5) construct them later, which
-/// is why the whole vocabulary is declared now.
-#[allow(dead_code)] // consumed by T3 (pywal) and T5 (picker), not by this task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThemeId {
     Catppuccin,
@@ -29,7 +24,6 @@ pub enum ThemeId {
     Wallpaper,
 }
 
-#[allow(dead_code)] // `parse`/`as_str` back the persistence layer added in T4.
 impl ThemeId {
     /// Parses the persisted lowercase identifier, or `None` for anything else.
     pub fn parse(s: &str) -> Option<Self> {
@@ -50,6 +44,25 @@ impl ThemeId {
             Self::Flexoki => "flexoki",
             Self::Wallpaper => "wallpaper",
         }
+    }
+
+    /// The user-facing label shown in the theme picker. Brand names stay
+    /// verbatim; only the descriptive `Wallpaper` id is translated, because
+    /// the whole UI is Spanish. Presentation only — persistence keeps using
+    /// [`as_str`](Self::as_str).
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Catppuccin => "Catppuccin",
+            Self::Dracula => "Dracula",
+            Self::Flexoki => "Flexoki",
+            Self::Wallpaper => "Papel tapiz",
+        }
+    }
+
+    /// Parses the stored id, falling back to today's default (Catppuccin) for
+    /// anything unknown — the single place for "stored id -> active theme".
+    pub fn from_persisted(s: &str) -> Self {
+        Self::parse(s).unwrap_or(Self::Catppuccin)
     }
 }
 
@@ -428,6 +441,33 @@ mod tests {
             for ((name, a), (_, b)) in slots(&wallpaper).iter().zip(slots(&catppuccin)) {
                 assert_eq!(a, &b, "wallpaper slot {name} diverged from the Catppuccin fallback");
             }
+        }
+    }
+
+    #[test]
+    fn display_names_are_non_empty_and_distinct() {
+        let names: Vec<&str> = ALL_THEMES.iter().map(|theme| theme.display_name()).collect();
+        for name in &names {
+            assert!(!name.is_empty(), "display name must not be empty");
+        }
+        for (i, a) in names.iter().enumerate() {
+            for b in &names[i + 1..] {
+                assert_ne!(a, b, "display names must be pairwise distinct");
+            }
+        }
+    }
+
+    #[test]
+    fn from_persisted_maps_valid_ids_and_falls_back_to_catppuccin() {
+        for theme in ALL_THEMES {
+            assert_eq!(ThemeId::from_persisted(theme.as_str()), theme);
+        }
+        for garbage in ["", "solarized", "Catppuccin", "dracula "] {
+            assert_eq!(
+                ThemeId::from_persisted(garbage),
+                ThemeId::Catppuccin,
+                "from_persisted({garbage:?}) must fall back to Catppuccin"
+            );
         }
     }
 }
