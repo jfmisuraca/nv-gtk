@@ -181,9 +181,17 @@ theme lacks are aliased to the theme's nearest defined hue — never to another 
     ("Drácula")/`theme_flexoki`/`theme_wallpaper` ("Papel tapiz"). Evidence: `./gradlew
     :app:assembleDebug` (from `android/`) -> BUILD SUCCESSFUL in 16s. No unit test added —
     mapping/persistence tests land in T11.
-- [ ] T10 **Android boot frame** — set the window background from the active palette in
+- [x] T10 **Android boot frame** — set the window background from the active palette in
   `onCreate` before `setContent`, so the static day/night XML color in
   `values/themes.xml` / `values-night/themes.xml` never flashes the wrong palette.
+  - **Done:** `bootBackground(theme, dark)` (NEW, non-Compose, in `ThemePalettes.kt`)
+    reads the `background` role from the same `ColorScheme` tables `colorSchemeFor`
+    serves; `MainActivity.onCreate` loads the theme via `ThemePrefs.load`, reads the
+    night qualifier from `resources.configuration.uiMode`, and calls
+    `window.setBackgroundDrawable` before `setContent`. `Wallpaper` resolves to the
+    Catppuccin fallback because the Material You dynamic roles are `@Composable`
+    and cannot run before `setContent` — matching the static XML. Evidence:
+    `./gradlew :app:assembleDebug` (from `android/`) -> BUILD SUCCESSFUL in 9s.
 - [ ] T11 **Verification** — `cargo check --workspace`, the desktop test suite, `./gradlew
   :app:assembleDebug`, and a Compose/unit test for the mapping and the default-preference
   resolution.
