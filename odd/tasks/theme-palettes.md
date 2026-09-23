@@ -163,10 +163,22 @@ lens slot open.
 
 The lens cannot run on the configured free model: `opencode/muse-spark-1.3-contributor-free` is
 rejected provider-side with `OpenCode's free tier can only be used from within OpenCode` (2/2
-attempts), while the same model succeeds on a non-review Task (`general` probe answered
-`PROBE_OK`). The review transport replaces the child session's system prompt with a one-line
-isolation instruction, which is the only path-level difference; the free-tier gate appears to
-reject that request. This is a model-provider refusal, not a Gentle AI defect.
+attempts).
+
+**Root cause (corrected after a wider probe):** the Zen free tier refuses *read-only* requests.
+Same model, same runtime, same parent session:
+
+| Agent | Tool posture | Free-model result |
+| --- | --- | --- |
+| `general` | bash/edit/write allowed | 83/83 ok + probe `PROBE_OK` |
+| `jd-fix-agent` | full tools | probe `PROBE_OK` |
+| `jd-judge-a` | bash/edit/write denied | 2/2 failed |
+| `review-reliability` | zero tools | 6/6 failed |
+
+The reviewer agents are read-only by contract, so free Zen models cannot run them. An earlier note
+blamed the review transport's system-prompt isolation; `jd-judge-a` is not transport-bound and
+fails identically, so that explanation was wrong. This is a model-provider rule, not a Gentle AI
+defect.
 
 **Fix applied:** the six review-transport agents (`review-risk`, `review-readability`,
 `review-reliability`, `review-resilience`, `review-refuter`, `review-validator`) now use
