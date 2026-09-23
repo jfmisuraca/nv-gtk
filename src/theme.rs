@@ -215,39 +215,71 @@ const DARK_BLOCK: &str = r#"
 fn render_block(template: &str, palette: &Palette) -> String {
     let mut css = template.to_string();
     for (token, value) in [
-        ("%%BASE%%", palette.base),
-        ("%%MANTLE%%", palette.mantle),
-        ("%%CRUST%%", palette.crust),
-        ("%%SURFACE0%%", palette.surface0),
-        ("%%SURFACE1%%", palette.surface1),
-        ("%%SURFACE2%%", palette.surface2),
-        ("%%OVERLAY0%%", palette.overlay0),
-        ("%%OVERLAY1%%", palette.overlay1),
-        ("%%OVERLAY2%%", palette.overlay2),
-        ("%%SUBTEXT0%%", palette.subtext0),
-        ("%%SUBTEXT1%%", palette.subtext1),
-        ("%%TEXT%%", palette.text),
-        ("%%LAVENDER%%", palette.lavender),
-        ("%%BLUE%%", palette.blue),
-        ("%%MAUVE%%", palette.mauve),
-        ("%%RED%%", palette.red),
-        ("%%GREEN%%", palette.green),
-        ("%%YELLOW%%", palette.yellow),
-        ("%%TEAL%%", palette.teal),
-        ("%%SKY%%", palette.sky),
-        ("%%PINK%%", palette.pink),
-        ("%%PEACH%%", palette.peach),
+        ("%%BASE%%", palette.base.as_ref()),
+        ("%%MANTLE%%", palette.mantle.as_ref()),
+        ("%%CRUST%%", palette.crust.as_ref()),
+        ("%%SURFACE0%%", palette.surface0.as_ref()),
+        ("%%SURFACE1%%", palette.surface1.as_ref()),
+        ("%%SURFACE2%%", palette.surface2.as_ref()),
+        ("%%OVERLAY0%%", palette.overlay0.as_ref()),
+        ("%%OVERLAY1%%", palette.overlay1.as_ref()),
+        ("%%OVERLAY2%%", palette.overlay2.as_ref()),
+        ("%%SUBTEXT0%%", palette.subtext0.as_ref()),
+        ("%%SUBTEXT1%%", palette.subtext1.as_ref()),
+        ("%%TEXT%%", palette.text.as_ref()),
+        ("%%LAVENDER%%", palette.lavender.as_ref()),
+        ("%%BLUE%%", palette.blue.as_ref()),
+        ("%%MAUVE%%", palette.mauve.as_ref()),
+        ("%%RED%%", palette.red.as_ref()),
+        ("%%GREEN%%", palette.green.as_ref()),
+        ("%%YELLOW%%", palette.yellow.as_ref()),
+        ("%%TEAL%%", palette.teal.as_ref()),
+        ("%%SKY%%", palette.sky.as_ref()),
+        ("%%PINK%%", palette.pink.as_ref()),
+        ("%%PEACH%%", palette.peach.as_ref()),
     ] {
         css = css.replace(token, value);
     }
     css
 }
 
+/// Resolves the light/dark palette pair for `theme`.
+///
+/// For `ThemeId::Wallpaper` with `Some(p)`, returns the same palette in both
+/// slots: a wallpaper-derived palette is defined by the wallpaper, not by the
+/// OS variant, so while `Wallpaper` is selected the OS light/dark switch
+/// deliberately does not change colors. With `None` it falls back to the
+/// normal lookup (which already yields Catppuccin). Every other theme ignores
+/// the `wallpaper` argument. Pure and injectable so tests can pass a palette
+/// without touching the filesystem.
+fn resolve_palettes_with(theme: ThemeId, wallpaper: Option<Palette>) -> (Palette, Palette) {
+    if theme == ThemeId::Wallpaper {
+        if let Some(p) = wallpaper {
+            return (p.clone(), p);
+        }
+    }
+    match theme {
+        ThemeId::Wallpaper | ThemeId::Catppuccin => (
+            palettes::palette(ThemeId::Catppuccin, Variant::Light),
+            palettes::palette(ThemeId::Catppuccin, Variant::Dark),
+        ),
+        _ => (
+            palettes::palette(theme, Variant::Light),
+            palettes::palette(theme, Variant::Dark),
+        ),
+    }
+}
+
+/// Resolves the light/dark palette pair for `theme`, reading the
+/// wallpaper-derived palette from the pywal cache when needed.
+fn resolve_palettes(theme: ThemeId) -> (Palette, Palette) {
+    resolve_palettes_with(theme, crate::pywal::load())
+}
+
 /// Builds the full stylesheet for `theme`: the light block resolved against
 /// the light palette, then the dark block against the dark palette.
 pub(crate) fn build_css(theme: ThemeId) -> String {
-    let light = palettes::palette(theme, Variant::Light);
-    let dark = palettes::palette(theme, Variant::Dark);
+    let (light, dark) = resolve_palettes(theme);
     let mut css = render_block(LIGHT_BLOCK, &light);
     css.push('\n');
     css.push_str(&render_block(DARK_BLOCK, &dark));
@@ -273,12 +305,12 @@ impl ThemeHandle {
     }
 }
 
-/// Loads the default (Catppuccin) stylesheet for `display` at application
+/// Loads the stylesheet for `theme` on `display` at application
 /// priority and returns a handle that can re-target the palette at runtime.
 ///
 /// The provider stays registered (and alive) with the display, matching how
 /// the autocomplete panel installs its provider in `wiki_autocomplete.rs`.
-pub fn load(display: &gdk::Display) -> ThemeHandle {
+pub fn load(display: &gdk::Display, theme: ThemeId) -> ThemeHandle {
     let provider = gtk4::CssProvider::new();
 
     // GTK >= 4.20 evaluates `@media (prefers-color-scheme: …)` against the
@@ -311,8 +343,7 @@ pub fn load(display: &gdk::Display) -> ThemeHandle {
     );
 
     let handle = ThemeHandle { provider };
-    // Today's default palette; T5's picker will call `apply` with other ids.
-    handle.apply(ThemeId::Catppuccin);
+    handle.apply(theme);
     handle
 }
 
@@ -363,5 +394,77 @@ mod tests {
         let css = build_css(ThemeId::Catppuccin);
         assert!(css.contains("#eff1f5"), "Latte base missing");
         assert!(css.contains("#1e1e2e"), "Mocha base missing");
+    }
+
+    fn slots(p: &Palette) -> [(&str, &str); 22] {
+        [
+            ("base", p.base.as_ref()),
+            ("mantle", p.mantle.as_ref()),
+            ("crust", p.crust.as_ref()),
+            ("surface0", p.surface0.as_ref()),
+            ("surface1", p.surface1.as_ref()),
+            ("surface2", p.surface2.as_ref()),
+            ("overlay0", p.overlay0.as_ref()),
+            ("overlay1", p.overlay1.as_ref()),
+            ("overlay2", p.overlay2.as_ref()),
+            ("subtext0", p.subtext0.as_ref()),
+            ("subtext1", p.subtext1.as_ref()),
+            ("text", p.text.as_ref()),
+            ("lavender", p.lavender.as_ref()),
+            ("blue", p.blue.as_ref()),
+            ("mauve", p.mauve.as_ref()),
+            ("red", p.red.as_ref()),
+            ("green", p.green.as_ref()),
+            ("yellow", p.yellow.as_ref()),
+            ("teal", p.teal.as_ref()),
+            ("sky", p.sky.as_ref()),
+            ("pink", p.pink.as_ref()),
+            ("peach", p.peach.as_ref()),
+        ]
+    }
+
+    fn assert_same_palette(a: &Palette, b: &Palette, context: &str) {
+        for ((name, x), (_, y)) in slots(a).iter().zip(slots(b)) {
+            assert_eq!(x, &y, "{context}: slot {name} diverged");
+        }
+    }
+
+    #[test]
+    fn wallpaper_without_pywal_falls_back_to_catppuccin() {
+        let (light, dark) = resolve_palettes_with(ThemeId::Wallpaper, None);
+        assert_same_palette(
+            &light,
+            &palettes::palette(ThemeId::Catppuccin, Variant::Light),
+            "wallpaper light",
+        );
+        assert_same_palette(
+            &dark,
+            &palettes::palette(ThemeId::Catppuccin, Variant::Dark),
+            "wallpaper dark",
+        );
+    }
+
+    #[test]
+    fn wallpaper_with_pywal_uses_same_palette_in_both_slots() {
+        let injected = palettes::palette(ThemeId::Flexoki, Variant::Dark);
+        let (light, dark) = resolve_palettes_with(ThemeId::Wallpaper, Some(injected.clone()));
+        assert_same_palette(&light, &injected, "wallpaper light");
+        assert_same_palette(&dark, &injected, "wallpaper dark");
+    }
+
+    #[test]
+    fn named_theme_ignores_injected_wallpaper_palette() {
+        let injected = palettes::palette(ThemeId::Flexoki, Variant::Dark);
+        let (light, dark) = resolve_palettes_with(ThemeId::Dracula, Some(injected));
+        assert_same_palette(
+            &light,
+            &palettes::palette(ThemeId::Dracula, Variant::Light),
+            "dracula light",
+        );
+        assert_same_palette(
+            &dark,
+            &palettes::palette(ThemeId::Dracula, Variant::Dark),
+            "dracula dark",
+        );
     }
 }
