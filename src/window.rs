@@ -5,13 +5,15 @@ use gtk4::gdk::{self, Key};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, Button, Entry, EventControllerKey, Label, ListBox, ListBoxRow,
-    Orientation, Overlay, Paned, ScrolledWindow, SearchEntry, SelectionMode, TextView, Window,
+    Align, Box as GtkBox, Button, CheckButton, Entry, EventControllerKey, Label, ListBox,
+    ListBoxRow, MenuButton, Orientation, Overlay, Paned, Popover, ScrolledWindow, SearchEntry,
+    SelectionMode, TextView, Window,
 };
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
 
 use crate::app_state::AppState;
+use crate::palettes::ThemeId;
 use crate::theme;
 use crate::wiki_autocomplete::WikiAutocomplete;
 use nv_core::config::Config;
@@ -174,12 +176,13 @@ fn rebuild_trash_rows(
 }
 
 pub fn build_ui(app: &Application) -> UiHandles {
-    // Apply the default Catppuccin theme before building the main window so
-    // every widget picks it up from the start (light -> Latte, dark -> Mocha).
-    // The handle is retained for the process; a later task (T5) will own it to
-    // re-target the palette from the theme picker.
-    let _theme_handle = gtk4::gdk::Display::default().map(|display| theme::load(&display));
     let config = Config::load();
+    // Aplica el tema guardado antes de construir la ventana para que cada
+    // widget lo tome desde el arranque. El handle queda vivo en un `Rc` para
+    // que el selector del pie pueda re-aplicar la paleta sin reiniciar.
+    let initial_theme = ThemeId::from_persisted(&config.theme);
+    let theme_handle: Option<Rc<theme::ThemeHandle>> =
+        gtk4::gdk::Display::default().map(|display| Rc::new(theme::load(&display, initial_theme)));
     let storage = StorageManager::new(&config);
     let initial_filtered: Vec<String> = storage.notes.iter().map(|n| n.id.clone()).collect();
 
@@ -296,6 +299,50 @@ pub fn build_ui(app: &Application) -> UiHandles {
 
     status_box.append(&status_label);
     status_box.append(&info_label);
+
+    // Selector de tema en el pie: un MenuButton con los cuatro temas como
+    // radio items. La elección se aplica en vivo y se persiste, sin reiniciar.
+    let theme_button = MenuButton::new();
+    theme_button.set_label(initial_theme.display_name());
+    theme_button.set_tooltip_text(Some("Tema (Ctrl+P)"));
+    let theme_popover = Popover::new();
+    let theme_list = GtkBox::new(Orientation::Vertical, 0);
+    theme_popover.set_child(Some(&theme_list));
+    theme_button.set_popover(Some(&theme_popover));
+    status_box.append(&theme_button);
+
+    const THEME_ORDER: [ThemeId; 4] = [
+        ThemeId::Catppuccin,
+        ThemeId::Dracula,
+        ThemeId::Flexoki,
+        ThemeId::Wallpaper,
+    ];
+    let mut theme_leader: Option<CheckButton> = None;
+    for id in THEME_ORDER {
+        let item = CheckButton::with_label(id.display_name());
+        if let Some(ref leader) = theme_leader {
+            item.set_group(Some(leader));
+        } else {
+            theme_leader = Some(item.clone());
+        }
+        item.set_active(id == initial_theme);
+        let theme_handle_c = theme_handle.clone();
+        let state_c = state.clone();
+        let theme_button_c = theme_button.clone();
+        item.connect_toggled(move |button| {
+            if !button.is_active() {
+                return;
+            }
+            if let Some(ref handle) = theme_handle_c {
+                handle.apply(id);
+            }
+            state_c.borrow_mut().config.theme = id.as_str().to_string();
+            state_c.borrow().config.save();
+            theme_button_c.set_label(id.display_name());
+        });
+        theme_list.append(&item);
+    }
+
     editor_box.append(&status_box);
 
     paned.set_end_child(Some(&editor_box));
@@ -1164,7 +1211,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
         }
     };
 
-    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+T, Ctrl+R, Ctrl+J, Ctrl+K)
+    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+T, Ctrl+R, Ctrl+J, Ctrl+K, Ctrl+P)
     let key_controller = EventControllerKey::new();
     key_controller.connect_key_pressed({
         let search_entry = search_entry.clone();
@@ -1178,6 +1225,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
         let open_trash_dialog = open_trash_dialog.clone();
         let rename_current_note = rename_current_note.clone();
         let move_list_selection = move_list_selection.clone();
+        let theme_button = theme_button.clone();
 
         move |_, key, _, modifier| {
             let is_ctrl = modifier.contains(gdk::ModifierType::CONTROL_MASK);
@@ -1215,6 +1263,10 @@ pub fn build_ui(app: &Application) -> UiHandles {
                 }
                 Key::r if is_ctrl => {
                     rename_current_note();
+                    glib::Propagation::Stop
+                }
+                Key::p if is_ctrl => {
+                    theme_button.popup();
                     glib::Propagation::Stop
                 }
                 Key::Escape => {
