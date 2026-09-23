@@ -121,10 +121,20 @@ theme lacks are aliased to the theme's nearest defined hue — never to another 
     tests, no filesystem access), `cargo check --workspace` clean, `xvfb-run -a cargo test -p
     nv-gtk --bin nv-gtk` 15/15. Assess: medium risk, `review_due_reason: under_budget` — the
     change joins the slice accumulating from `ead875e` and is reviewed when it crosses budget.
-- [ ] T5 **Desktop picker UI** — install an `adw::HeaderBar` on the `ApplicationWindow` with a
-  menu button whose popover lists the four themes as radio items; selection applies the palette
-  immediately and persists it. **Flagged decision:** this changes the window chrome from the
-  plain titlebar to a libadwaita header bar.
+- [x] T5 **Desktop picker UI** — **the plan's `adw::HeaderBar` is VETOED** (user decision,
+  2026-09-22): the window chrome must not change. Translated onto the existing status footer
+  instead of new chrome: a `MenuButton` at the right edge of the footer row whose popover lists
+  the four themes as grouped radio items, opened by click or `Ctrl+P`, labelled with the active
+  theme's `display_name()`. Selection calls `ThemeHandle::apply` live and persists it.
+  - **Done (c2acb6f):** `ThemeId::display_name` (presentation only; `Wallpaper` reads "Papel
+    tapiz" in the Spanish UI) and `ThemeId::from_persisted` (parse + Catppuccin fallback);
+    `theme::load(display, theme)` no longer hardcodes Catppuccin; `resolve_palettes_with`
+    injects the pywal palette for `Wallpaper` and uses the **same** palette in both `@media`
+    blocks — a wallpaper-derived theme is defined by the wallpaper, not by the OS light/dark
+    switch. Evidence: `xvfb-run -a cargo test -p nv-gtk --bin nv-gtk` -> 20/20 (5 new pure
+    tests), `cargo test -p nv_core` 34/34, `cargo check --workspace` warning-free,
+    `sh scripts/verify-theme.sh` 4/4 PASS. No header bar, menubar or toolbar added; every hex
+    value unchanged. Assess: `under_budget`, joins the slice accumulating from `ead875e`.
 - [ ] T6 **Desktop verification** — extend `scripts/verify-theme.sh` to assert rendered pixels
   per theme and variant (Dracula `#282A36`, Alucard `#FFFBEB`, Flexoki `#100F0F`/`#FFFCF0`,
   Catppuccin `#1E1E2E`/`#EFF1F5`), reusing the `GSETTINGS_BACKEND=keyfile` +
@@ -223,7 +233,10 @@ was opened. Non-blocking findings, all separate later work:
 | R3-NO-CONTRAST-GATE | SUGGESTION | `src/pywal.rs:41-50` | The derived pywal palette is accepted without a contrast assertion; the low-contrast risk stays documented but unpinned. |
 
 ## Open risks
-- Adding a header bar visibly changes the desktop window chrome (T5). Veto-able.
+- ~~Adding a header bar visibly changes the desktop window chrome (T5). Veto-able.~~ **Resolved
+  2026-09-22: vetoed.** The picker lives in the existing status footer, so the window chrome is
+  unchanged; the trade-off is that the control sits inside the content area instead of the title
+  bar.
 - pywal palettes are arbitrary; the blend rule can produce low-contrast pairs. T1's contrast
   test covers the named themes; pywal gets a structural check plus a documented fallback.
 - Android has no persistence layer today, so T8 introduces the first one; keep it minimal.
