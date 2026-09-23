@@ -5,16 +5,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.togetherWith
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.navigationevent.NavigationEvent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,7 +33,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +46,7 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,8 +59,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -108,7 +109,7 @@ class MainActivity : ComponentActivity() {
             } else {
                 CatppuccinLightColors
             }
-            MaterialTheme(colorScheme = colorScheme) {
+            MaterialTheme(colorScheme = colorScheme, typography = AppTypography, shapes = AppShapes) {
                 Surface(Modifier.fillMaxSize()) {
                     NvApp(storage)
                 }
@@ -124,16 +125,17 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun NvApp(storage: NvStorage) {
     val scope = rememberCoroutineScope()
+    val newNoteDefaultTitle = stringResource(R.string.new_note_default_title)
     val windowSizeClass = WindowSizeClass.fromWidth(LocalConfiguration.current.screenWidthDp)
     val storage = storage
     var notes by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
     var trash by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
-    var selectedId by remember { mutableStateOf<String?>(null) }
-    var showTrash by remember { mutableStateOf(false) }
+    var editorNote by remember { mutableStateOf<NoteSnapshot?>(null) }
+    var editorAutoFocus by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<NoteSnapshot>?>(null) }
@@ -160,46 +162,93 @@ private fun NvApp(storage: NvStorage) {
 
     LaunchedEffect(storage) { refresh() }
 
-    val selected = notes.firstOrNull { it.id == selectedId }
-    AnimatedContent(
-        targetState = when {
-            showTrash -> "trash"
-            selected == null -> "list"
-            else -> "editor"
-        },
-        transitionSpec = {
-            (fadeIn() + scaleIn(initialScale = 0.98f)) togetherWith
-                (fadeOut() + scaleOut(targetScale = 0.98f))
-        },
-        label = "pantalla-actual"
-    ) { screen ->
-        when (screen) {
-            "trash" -> TrashScreen(
-                trash = trash,
-                error = error,
-                windowSizeClass = windowSizeClass,
-                onBack = { showTrash = false },
-                onRestore = { id -> ioOp { storage.restoreNote(id) } },
-                onPurge = { id -> ioOp { storage.purgeNote(id) } },
-                onEmpty = { ioOp { storage.emptyTrash() } }
+    // Debounce search: typing updates `query`; this relaunches after 300ms
+    // of inactivity so refresh() re-runs searchNotes with the final query.
+    LaunchedEffect(query) {
+        delay(300)
+        refresh()
+    }
+
+    val navController = rememberNavController()
+    NavHost(
+        navController = navController,
+        startDestination = "list",
+        // Predictive back: scale the exiting screen toward the swipe edge,
+        // like the system back-to-home animation that follows the gesture,
+        // instead of the default center-origin scale.
+        predictivePopExitTransition = { swipeEdge ->
+            scaleOut(
+                targetScale = 0.7f,
+                transformOrigin = TransformOrigin(
+                    pivotFractionX = if (swipeEdge == NavigationEvent.EDGE_LEFT) 0f else 1f,
+                    pivotFractionY = 0.5f,
+                )
             )
-            "list" -> NotesListScreen(
+        },
+    ) {
+        composable("list") {
+            NotesListScreen(
                 notes = results ?: notes,
                 filtering = results != null,
                 query = query,
                 error = error,
                 windowSizeClass = windowSizeClass,
-                onOpen = { selectedId = it },
+                onOpen = { id ->
+                    editorNote = notes.firstOrNull { it.id == id }
+                    editorAutoFocus = false
+                    navController.navigate("editor")
+                },
                 onQueryChange = { query = it },
-                onTrash = { showTrash = true },
-                onCreate = { ioOp { storage.createNote("Nota nueva") } }
+                onTrash = { navController.navigate("trash") },
+                onCreate = {
+                    // createNote is IO; navigation and Compose state must run
+                    // on the main thread (NavController touches the lifecycle).
+                    scope.launch {
+                        val created = withContext(Dispatchers.IO) {
+                            runCatching { storage.createNote(newNoteDefaultTitle) }
+                        }
+                        created.onSuccess { note ->
+                            editorNote = note      // editor reads the note BY VALUE after creation
+                            editorAutoFocus = true // auto-open the keyboard only on the brand-new note
+                            navController.navigate("editor")
+                            refresh()
+                        }.onFailure { error = it.message }
+                    }
+                }
             )
-            "editor" -> NoteEditorScreen(
-                selected!!,
-                storage,
-                windowSizeClass,
-                onDone = { selectedId = null; refresh() },
-                onRenamed = { renamed -> selectedId = renamed.id; refresh() }
+        }
+        composable("editor") {
+            // Refresh the list whenever the editor leaves composition, so a
+            // SYSTEM back gesture (which bypasses onDone) still shows fresh data.
+            DisposableEffect(Unit) {
+                onDispose { refresh() }
+            }
+            val note = editorNote
+            if (note == null) return@composable
+            NoteEditorScreen(
+                note = note,
+                storage = storage,
+                windowSizeClass = windowSizeClass,
+                autoFocusKeyboard = editorAutoFocus,
+                onDone = {
+                    editorAutoFocus = false
+                    navController.popBackStack()
+                },
+                onRenamed = { renamed ->
+                    editorNote = renamed
+                    refresh()
+                }
+            )
+        }
+        composable("trash") {
+            TrashScreen(
+                trash = trash,
+                error = error,
+                windowSizeClass = windowSizeClass,
+                onBack = { navController.popBackStack() },
+                onRestore = { id -> ioOp { storage.restoreNote(id) } },
+                onPurge = { id -> ioOp { storage.purgeNote(id) } },
+                onEmpty = { ioOp { storage.emptyTrash() } }
             )
         }
     }
