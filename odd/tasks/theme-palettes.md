@@ -192,21 +192,39 @@ theme lacks are aliased to the theme's nearest defined hue — never to another 
     Catppuccin fallback because the Material You dynamic roles are `@Composable`
     and cannot run before `setContent` — matching the static XML. Evidence:
     `./gradlew :app:assembleDebug` (from `android/`) -> BUILD SUCCESSFUL in 9s.
-- [ ] T11 **Verification** — `cargo check --workspace`, the desktop test suite, `./gradlew
+- [x] T11 **Verification** — `cargo check --workspace`, the desktop test suite, `./gradlew
   :app:assembleDebug`, and a Compose/unit test for the mapping and the default-preference
   resolution.
+  - **Done:** `android/app/src/test/java/ar/com/nvgtk/ThemeMappingTest.kt` (NEW, 7 tests)
+    pins `NvTheme` ids against the desktop persistence strings, `fromPersisted`
+    round-trip + unknown/blank/uppercase -> Catppuccin fallback,
+    `ThemePrefs.DEFAULT_THEME == Wallpaper`, `bootBackground` identity with the served
+    scheme tables, the six authoritative background hexes, and the Wallpaper ->
+    Catppuccin boot fallback; `testImplementation("junit:junit:4.13.2")` added
+    (test-only, no runtime dependency). Evidence: `cargo check --workspace` clean,
+    `xvfb-run -a cargo test -p nv-gtk --bin nv-gtk` -> 20/20, `cargo test -p nv_core`
+    -> 34/34, `./gradlew :app:testDebugUnitTest` -> 7/7,
+    `./gradlew :app:assembleDebug` -> BUILD SUCCESSFUL, `sh scripts/verify-theme.sh`
+    -> 10/10 PASS. The `SharedPreferences` load/save round-trip itself has no
+    harness in scope (no Robolectric/device); it is pinned indirectly via
+    `DEFAULT_THEME` + `fromPersisted`.
 
 ## Authorized scope
 Theming and color only, plus the minimum navigation/settings surface needed to choose a theme.
 No behavior changes to notes, search, storage or trash. No new runtime dependencies.
 
 ## Acceptance criteria
-- [ ] Each of Catppuccin, Dracula and Flexoki renders its own light and dark palette on both
-      platforms, following the OS variant.
-- [ ] `Wallpaper` renders Material You on Android (API >= 31) and pywal colors on desktop when
-      pywal output exists, and falls back to Catppuccin when it does not.
-- [ ] The choice survives an app restart on both platforms.
-- [ ] No test regressions; `assembleDebug` succeeds; `verify-theme.sh` passes.
+- [x] Each of Catppuccin, Dracula and Flexoki renders its own light and dark palette on both
+      platforms, following the OS variant. (Desktop: `verify-theme.sh` 6-case matrix PASS;
+      Android: `ThemeMappingTest` pins all four scheme tables + six background hexes.)
+- [x] `Wallpaper` renders Material You on Android (API >= 31) and pywal colors on desktop when
+      pywal output exists, and falls back to Catppuccin when it does not. (Desktop: pywal
+      light/dark runs PASS; Android: API-31 guard code path + `bootBackground` fallback test.)
+- [x] The choice survives an app restart on both platforms. (Desktop: `Config.theme` serde
+      round-trip/legacy tests, T4; Android: `ThemePrefs` save/load via `DEFAULT_THEME` +
+      `fromPersisted`, T11 test — live restart exercised on desktop config only.)
+- [x] No test regressions; `assembleDebug` succeeds; `verify-theme.sh` passes. (20/20 +
+      34/34 + 7/7, BUILD SUCCESSFUL, 10/10 PASS — T11 evidence above.)
 
 ## Route
 Delegated direct writers, one writer per task group. Desktop (Rust) and Android (Kotlin) are
