@@ -174,11 +174,11 @@ fn rebuild_trash_rows(
 }
 
 pub fn build_ui(app: &Application) -> UiHandles {
-    // Apply the Catppuccin theme before building the main window so every
-    // widget picks it up from the start (light -> Latte, dark -> Mocha).
-    if let Some(display) = gtk4::gdk::Display::default() {
-        theme::load(&display);
-    }
+    // Apply the default Catppuccin theme before building the main window so
+    // every widget picks it up from the start (light -> Latte, dark -> Mocha).
+    // The handle is retained for the process; a later task (T5) will own it to
+    // re-target the palette from the theme picker.
+    let _theme_handle = gtk4::gdk::Display::default().map(|display| theme::load(&display));
     let config = Config::load();
     let storage = StorageManager::new(&config);
     let initial_filtered: Vec<String> = storage.notes.iter().map(|n| n.id.clone()).collect();
