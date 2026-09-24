@@ -958,10 +958,14 @@ pub fn build_ui(app: &Application) -> UiHandles {
                 // no hay nota seleccionada, lo que el usuario escriba se pierde.
                 {
                     let buffer = text_view.buffer();
-                    let mut st = state.borrow_mut();
-                st.is_updating_ui = true;
-                buffer.set_text("");
-                    drop(st);
+                    // No mantener el guard de `borrow_mut()` vivo durante `set_text`:
+                    // emite `changed` sincrónicamente y su handler pide otro
+                    // `borrow_mut()` -> panic "RefCell already borrowed" (Ctrl+D).
+                    // Además el flag tiene que volver a false (antes quedaba en true
+                    // y el auto-save quedaba suprimido tras borrar).
+                    state.borrow_mut().is_updating_ui = true;
+                    buffer.set_text("");
+                    state.borrow_mut().is_updating_ui = false;
                 }
 
                 info_label.set_text("Nota movida a la papelera");
