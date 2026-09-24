@@ -70,6 +70,8 @@ fun TrashScreen(
     var pendingPurge by remember { mutableStateOf<NoteSnapshot?>(null) }
     var confirmEmpty by remember { mutableStateOf(false) }
     var openedId by remember { mutableStateOf<String?>(null) }
+    // Derived titles (desktop parity); the stem stays identity everywhere.
+    val emptyTitle = stringResource(R.string.note_empty_title)
 
     val opened = trash.firstOrNull { it.id == openedId }
     if (opened != null) {
@@ -87,7 +89,7 @@ fun TrashScreen(
         AlertDialog(
             onDismissRequest = { pendingPurge = null },
             title = { Text(stringResource(R.string.purge_dialog_title)) },
-            text = { Text(stringResource(R.string.confirm_purge, pendingPurge?.title ?: "")) },
+            text = { Text(stringResource(R.string.confirm_purge, pendingPurge?.let { displayTitle(it.content, emptyTitle) } ?: "")) },
             confirmButton = {
                 TextButton(onClick = {
                     pendingPurge?.let { onPurge(it.id) }
@@ -187,11 +189,11 @@ fun TrashScreen(
                                 shape = AppShapes.largeIncreased
                             ) {
                                 Row(
-                                    Modifier.padding(12.dp),
+                                    Modifier.padding(20.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        note.title,
+                                        displayTitle(note.content, emptyTitle),
                                         style = MaterialTheme.typography.titleMedium,
                                         modifier = Modifier.weight(1f)
                                     )
@@ -226,6 +228,7 @@ private fun TrashNoteDetail(
     onPurge: () -> Unit
 ) {
     var confirmPurge by remember { mutableStateOf(false) }
+    val emptyTitle = stringResource(R.string.note_empty_title)
 
     BackHandler(onBack = onBack)
 
@@ -233,7 +236,7 @@ private fun TrashNoteDetail(
         AlertDialog(
             onDismissRequest = { confirmPurge = false },
             title = { Text(stringResource(R.string.purge_dialog_title)) },
-            text = { Text(stringResource(R.string.confirm_purge, note.title)) },
+            text = { Text(stringResource(R.string.confirm_purge, displayTitle(note.content, emptyTitle))) },
             confirmButton = {
                 TextButton(onClick = { confirmPurge = false; onPurge() }) {
                     Text(stringResource(R.string.delete))
@@ -252,7 +255,7 @@ private fun TrashNoteDetail(
             TopAppBar(
                 title = {
                     Text(
-                        note.title,
+                        displayTitle(note.content, emptyTitle),
                         style = TitleLargeEmphasized
                     )
                 },

@@ -82,6 +82,7 @@ fun NoteEditorScreen(
     val scope = rememberCoroutineScope()
     val editorFieldLabel = stringResource(R.string.editor_field_label)
     val titleFieldLabel = stringResource(R.string.title_field_label)
+    val emptyTitle = stringResource(R.string.note_empty_title)
     val textFieldState = rememberTextFieldState(initialText = note.content)
     val density = LocalDensity.current
     val imeBottom = WindowInsets.ime.getBottom(density)
@@ -194,6 +195,9 @@ fun NoteEditorScreen(
                         // The title is an in-place edit affordance: expose it as
                         // a button (role + 48dp minimum touch target, centered so
                         // the glyphs never move).
+                        // Derived title (desktop parity) follows the LIVE text so
+                        // the bar reflects what is typed; rename still renames
+                        // the FILE (doRename/titleText untouched).
                         Box(
                             Modifier
                                 .heightIn(min = 48.dp)
@@ -201,7 +205,7 @@ fun NoteEditorScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                note.title,
+                                displayTitle(textFieldState.text.toString(), emptyTitle),
                                 style = HeadlineMediumEmphasized
                             )
                         }
