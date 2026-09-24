@@ -172,6 +172,9 @@ fun NotesListScreen(
                         )
                     }
                 } else {
+                    // Derived title (desktop parity): first non-blank content
+                    // line; the stem stays list identity (`key = { it.id }`).
+                    val emptyTitle = stringResource(R.string.note_empty_title)
                     LazyColumn(Modifier.fillMaxSize().padding(8.dp)) {
                         items(notes, key = { it.id }) { note ->
                             ElevatedCard(
@@ -182,12 +185,19 @@ fun NotesListScreen(
                                     .padding(vertical = 4.dp),
                                 shape = AppShapes.largeIncreased
                             ) {
-                                Column(Modifier.padding(12.dp)) {
-                                    Text(note.title, style = MaterialTheme.typography.titleMedium)
-                                    if (note.content.isNotBlank()) {
+                                Column(Modifier.padding(20.dp)) {
+                                    Text(
+                                        displayTitle(note.content, emptyTitle),
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                    // Preview starts at the SECOND non-blank line
+                                    // so it never repeats the title; hidden when
+                                    // there is no body.
+                                    val remainder = displayRemainder(note.content)
+                                    if (remainder.isNotBlank()) {
                                         Spacer(Modifier.height(4.dp))
                                         Text(
-                                            note.content.take(140),
+                                            remainder.take(140),
                                             style = MaterialTheme.typography.bodyMedium,
                                             maxLines = 3
                                         )
