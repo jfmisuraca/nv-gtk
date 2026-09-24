@@ -59,7 +59,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
@@ -72,6 +71,8 @@ import kotlinx.coroutines.withContext
 import uniffi.nv_core.NoteSnapshot
 import uniffi.nv_core.NvStorage
 import java.io.File
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 /** T2: window width size class with the Material 3 cutoffs. */
 enum class WindowSizeClass {
@@ -147,7 +148,6 @@ private fun NvApp(
     onThemeChange: (NvTheme) -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val newNoteDefaultTitle = stringResource(R.string.new_note_default_title)
     val windowSizeClass = WindowSizeClass.fromWidth(LocalConfiguration.current.screenWidthDp)
     val storage = storage
     var notes by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
@@ -224,7 +224,15 @@ private fun NvApp(
                     // on the main thread (NavController touches the lifecycle).
                     scope.launch {
                         val created = withContext(Dispatchers.IO) {
-                            runCatching { storage.createNote(newNoteDefaultTitle) }
+                            runCatching {
+                                // Desktop-parity timestamp stem (AAAAMMDD-HHMM);
+                                // core disambiguates same-minute collisions
+                                // with seconds. java.time needs API 26+ and
+                                // minSdk is already 26.
+                                val stamp = LocalDateTime.now()
+                                    .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))
+                                storage.createNote(stamp)
+                            }
                         }
                         created.onSuccess { note ->
                             editorNote = note      // editor reads the note BY VALUE after creation
