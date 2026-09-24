@@ -297,3 +297,9 @@ was opened. Non-blocking findings, all separate later work:
 - pywal palettes are arbitrary; the blend rule can produce low-contrast pairs. T1's contrast
   test covers the named themes; pywal gets a structural check plus a documented fallback.
 - Android has no persistence layer today, so T8 introduces the first one; keep it minimal.
+
+## Closure (2026-09-23)
+- **Delivered:** stacked-to-main PRs #2-#5 merged in order to `main` (`59041d4`, `820f180`, `2153ebe`, `f26e4f1`). `gh pr list` empty.
+- **Post-merge verification on `f26e4f1`:** `cargo check --workspace` clean, `nv-gtk` 20/20, `nv_core` 34/34, `ThemeMappingTest` 7/7, `assembleDebug` BUILD SUCCESSFUL, `verify-theme.sh` 10/10 PASS.
+- **Cleanup:** 5 ramas locales y 4 remotas del stack borradas (`-d`, fully merged, sin forzar). `main` en `f26e4f1` limpio y sincronizado con `origin/main`.
+- **Estado:** feature cerrada en `main`, sin contenido único pendiente.
