@@ -694,12 +694,13 @@ pub fn build_ui(app: &Application) -> UiHandles {
         title_label.set_hexpand(true);
         title_label.set_tooltip_text(Some(&display_title));
 
-        let meta_str = format!(
-            "{} (creada {}) • {}",
-            note.formatted_date(),
-            note.formatted_created_date(),
-            note.tags.join(" ")
-        );
+        // Meta de la fila (parity slice 1): SOLO fecha/hora de modificación
+        // (formato canónico `formatted_date`) + tags. Sin fecha de creación.
+        let meta_str = if note.tags.is_empty() {
+            note.formatted_date()
+        } else {
+            format!("{} • {}", note.formatted_date(), note.tags.join(" "))
+        };
         let meta_label = Label::new(Some(&meta_str));
         meta_label.set_halign(Align::Fill);
         meta_label.set_xalign(0.0);
