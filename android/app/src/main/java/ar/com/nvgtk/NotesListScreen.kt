@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
@@ -47,10 +49,23 @@ import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 
 import uniffi.nv_core.NoteSnapshot
+
+private val modifiedFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
+/**
+ * Parity slice 1: espeja el `formatted_date` de desktop (`%Y-%m-%d %H:%M`).
+ * `modifiedMs` cruza FFI como unix millis (`nv-core/src/ffi.rs`).
+ */
+internal fun formatModifiedMs(modifiedMs: Long): String =
+    Instant.ofEpochMilli(modifiedMs).atZone(ZoneId.systemDefault()).format(modifiedFormatter)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +79,7 @@ fun NotesListScreen(
     onTrash: () -> Unit,
     onSettings: () -> Unit,
     onCreate: () -> Unit,
+    onSearchSubmit: () -> Unit,
     windowSizeClass: WindowSizeClass
 ) {
     Scaffold(
@@ -135,6 +151,13 @@ fun NotesListScreen(
                     }
                 },
                 singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                // Parity slice 1 (T1): Enter abre la mejor coincidencia o
+                // crea nota con la query. onDone cubre el Enter físico.
+                keyboardActions = KeyboardActions(
+                    onSearch = { onSearchSubmit() },
+                    onDone = { onSearchSubmit() }
+                ),
                 shape = AppShapes.extraLarge
             )
             if (filtering) {
@@ -202,13 +225,20 @@ fun NotesListScreen(
                                             maxLines = 3
                                         )
                                     }
-                                    if (note.tags.isNotEmpty()) {
-                                        Spacer(Modifier.height(4.dp))
-                                        Text(
-                                            note.tags.joinToString(" ") { "#$it" },
-                                            style = MaterialTheme.typography.labelSmall
-                                        )
+                                    // Parity slice 1 (T2): SOLO fecha/hora de
+                                    // modificación (+ tags), mismo formato
+                                    // canónico que desktop.
+                                    Spacer(Modifier.height(4.dp))
+                                    val meta = if (note.tags.isEmpty()) {
+                                        formatModifiedMs(note.modifiedMs)
+                                    } else {
+                                        formatModifiedMs(note.modifiedMs) + " • " +
+                                            note.tags.joinToString(" ") { "#$it" }
                                     }
+                                    Text(
+                                        meta,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
                                 }
                             }
                         }
