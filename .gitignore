@@ -16,3 +16,5 @@ android/local.properties
 config.json
 # CodeGraph local index
 .codegraph/
+# ODD task docs: local-only workflow, versioned in local/odd (never push)
+odd/
