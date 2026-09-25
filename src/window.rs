@@ -205,17 +205,94 @@ struct WindowShortcut {
 }
 
 const WINDOW_SHORTCUTS: &[WindowShortcut] = &[
-    WindowShortcut { key: Key::j, with_ctrl: true, section: "Generales", keys_label: "Ctrl+J", description: "Nota siguiente", action: ShortcutAction::NextNote },
-    WindowShortcut { key: Key::k, with_ctrl: true, section: "Generales", keys_label: "Ctrl+K", description: "Nota anterior", action: ShortcutAction::PrevNote },
-    WindowShortcut { key: Key::l, with_ctrl: true, section: "Generales", keys_label: "Ctrl+L", description: "Ir al buscador", action: ShortcutAction::FocusSearch },
-    WindowShortcut { key: Key::f, with_ctrl: true, section: "Generales", keys_label: "Ctrl+F", description: "Ir al buscador", action: ShortcutAction::FocusSearch },
-    WindowShortcut { key: Key::n, with_ctrl: true, section: "Generales", keys_label: "Ctrl+N", description: "Nota nueva", action: ShortcutAction::NewNote },
-    WindowShortcut { key: Key::d, with_ctrl: true, section: "Generales", keys_label: "Ctrl+D", description: "Mover la nota actual a la papelera", action: ShortcutAction::DeleteNote },
-    WindowShortcut { key: Key::t, with_ctrl: true, section: "Generales", keys_label: "Ctrl+T", description: "Abrir la papelera", action: ShortcutAction::OpenTrash },
-    WindowShortcut { key: Key::r, with_ctrl: true, section: "Generales", keys_label: "Ctrl+R", description: "Renombrar la nota actual", action: ShortcutAction::RenameNote },
-    WindowShortcut { key: Key::p, with_ctrl: true, section: "Generales", keys_label: "Ctrl+P", description: "Selector de tema", action: ShortcutAction::ThemePicker },
-    WindowShortcut { key: Key::question, with_ctrl: true, section: "Generales", keys_label: "Ctrl+?", description: "Mostrar esta ventana", action: ShortcutAction::OpenShortcuts },
-    WindowShortcut { key: Key::Escape, with_ctrl: false, section: "Generales", keys_label: "Esc", description: "Cerrar panel / ir al buscador", action: ShortcutAction::EscapeContextual },
+    WindowShortcut {
+        key: Key::j,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+J",
+        description: "Nota siguiente",
+        action: ShortcutAction::NextNote,
+    },
+    WindowShortcut {
+        key: Key::k,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+K",
+        description: "Nota anterior",
+        action: ShortcutAction::PrevNote,
+    },
+    WindowShortcut {
+        key: Key::l,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+L",
+        description: "Ir al buscador",
+        action: ShortcutAction::FocusSearch,
+    },
+    WindowShortcut {
+        key: Key::f,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+F",
+        description: "Ir al buscador",
+        action: ShortcutAction::FocusSearch,
+    },
+    WindowShortcut {
+        key: Key::n,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+N",
+        description: "Nota nueva",
+        action: ShortcutAction::NewNote,
+    },
+    WindowShortcut {
+        key: Key::d,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+D",
+        description: "Mover la nota actual a la papelera",
+        action: ShortcutAction::DeleteNote,
+    },
+    WindowShortcut {
+        key: Key::t,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+T",
+        description: "Abrir la papelera",
+        action: ShortcutAction::OpenTrash,
+    },
+    WindowShortcut {
+        key: Key::r,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+R",
+        description: "Renombrar la nota actual",
+        action: ShortcutAction::RenameNote,
+    },
+    WindowShortcut {
+        key: Key::p,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+P",
+        description: "Selector de tema",
+        action: ShortcutAction::ThemePicker,
+    },
+    WindowShortcut {
+        key: Key::question,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+?",
+        description: "Mostrar esta ventana",
+        action: ShortcutAction::OpenShortcuts,
+    },
+    WindowShortcut {
+        key: Key::Escape,
+        with_ctrl: false,
+        section: "Generales",
+        keys_label: "Esc",
+        description: "Cerrar panel / ir al buscador",
+        action: ShortcutAction::EscapeContextual,
+    },
 ];
 
 pub fn build_ui(app: &Application) -> UiHandles {
@@ -1284,12 +1361,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
                                 let _ = st.storage.empty_trash();
                             }
                             update_search_c();
-                            rebuild_trash_rows(
-                                &list_c,
-                                &state_c,
-                                &update_search_c,
-                                &dialog_c2,
-                            );
+                            rebuild_trash_rows(&list_c, &state_c, &update_search_c, &dialog_c2);
                         },
                     );
                 });
@@ -1335,10 +1407,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
                 set_results_visible(true);
             }
 
-            let current_index = lb
-                .selected_row()
-                .map(|row| row.index())
-                .unwrap_or(-1);
+            let current_index = lb.selected_row().map(|row| row.index()).unwrap_or(-1);
 
             let target_index = current_index + delta;
             if target_index < 0 {
@@ -1522,9 +1591,7 @@ mod tests {
         // Filas con contenido para el cheatsheet.
         for sc in WINDOW_SHORTCUTS {
             assert!(
-                !sc.section.is_empty()
-                    && !sc.keys_label.is_empty()
-                    && !sc.description.is_empty()
+                !sc.section.is_empty() && !sc.keys_label.is_empty() && !sc.description.is_empty()
             );
         }
     }
