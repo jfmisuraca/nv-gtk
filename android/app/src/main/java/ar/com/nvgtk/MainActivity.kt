@@ -188,6 +188,40 @@ private fun NvApp(
     }
 
     val navController = rememberNavController()
+
+    // Wiki-link navigation (parity slice 3, desktop flow): open the note
+    // whose display title matches `target`; when none matches, create a note
+    // with the target as content (like desktop Enter-on-search) and open it.
+    // Stays on the editor route (single-top) when already editing.
+    fun followWikiLink(target: String) {
+        val clean = target.trim()
+        if (clean.isEmpty()) return
+        scope.launch {
+            val resolved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val existing = storage.wikiResolve(clean)
+                    if (existing != null) {
+                        existing
+                    } else {
+                        // Desktop-parity timestamp stem (yyyyMMdd-HHmm); the
+                        // core disambiguates same-minute collisions.
+                        val stamp = LocalDateTime.now()
+                            .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))
+                        val created = storage.createNote(stamp)
+                        storage.saveNote(created.id, clean)
+                    }
+                }
+            }
+            resolved.onSuccess { snap ->
+                editorNote = snap
+                editorAutoFocus = false
+                navController.navigate("editor") {
+                    launchSingleTop = true
+                }
+                refresh()
+            }.onFailure { error = it.message }
+        }
+    }
     NavHost(
         navController = navController,
         startDestination = "list",
@@ -264,7 +298,8 @@ private fun NvApp(
                 onRenamed = { renamed ->
                     editorNote = renamed
                     refresh()
-                }
+                },
+                onFollowLink = { target -> followWikiLink(target) }
             )
         }
         composable("trash") {

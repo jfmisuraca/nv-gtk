@@ -673,6 +673,12 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
+    external fun uniffi_nv_core_checksum_func_extract_wiki_links(
+    ): Int
+    external fun uniffi_nv_core_checksum_func_link_at_cursor(
+    ): Int
+    external fun uniffi_nv_core_checksum_func_open_wiki_query(
+    ): Int
     external fun uniffi_nv_core_checksum_method_nvstorage_create_note(
     ): Int
     external fun uniffi_nv_core_checksum_method_nvstorage_delete_note(
@@ -694,6 +700,10 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_nv_core_checksum_method_nvstorage_save_note(
     ): Int
     external fun uniffi_nv_core_checksum_method_nvstorage_search_notes(
+    ): Int
+    external fun uniffi_nv_core_checksum_method_nvstorage_wiki_resolve(
+    ): Int
+    external fun uniffi_nv_core_checksum_method_nvstorage_wiki_suggest(
     ): Int
     external fun uniffi_nv_core_checksum_constructor_nvstorage_open(
     ): Int
@@ -742,6 +752,16 @@ internal object UniffiLib {
     external fun uniffi_nv_core_fn_method_nvstorage_save_note(`ptr`: Long,`id`: RustBuffer.ByValue,`content`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_nv_core_fn_method_nvstorage_search_notes(`ptr`: Long,`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_nv_core_fn_method_nvstorage_wiki_resolve(`ptr`: Long,`target`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_nv_core_fn_method_nvstorage_wiki_suggest(`ptr`: Long,`query`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_nv_core_fn_func_extract_wiki_links(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_nv_core_fn_func_link_at_cursor(`text`: RustBuffer.ByValue,`cursorChars`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_nv_core_fn_func_open_wiki_query(`lineBeforeCursor`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun ffi_nv_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -862,6 +882,15 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if ((lib.uniffi_nv_core_checksum_func_extract_wiki_links() and 0xFFFF) != 30004) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_nv_core_checksum_func_link_at_cursor() and 0xFFFF) != 9229) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_nv_core_checksum_func_open_wiki_query() and 0xFFFF) != 31615) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if ((lib.uniffi_nv_core_checksum_method_nvstorage_create_note() and 0xFFFF) != 45275) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -893,6 +922,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_nv_core_checksum_method_nvstorage_search_notes() and 0xFFFF) != 37250) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_wiki_resolve() and 0xFFFF) != 53787) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if ((lib.uniffi_nv_core_checksum_method_nvstorage_wiki_suggest() and 0xFFFF) != 43467) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if ((lib.uniffi_nv_core_checksum_constructor_nvstorage_open() and 0xFFFF) != 8224) {
@@ -1346,6 +1381,20 @@ public interface NvStorageInterface {
      */
     fun `searchNotes`(`query`: kotlin.String): List<NoteSnapshot>
     
+    /**
+     * Resolve a `[[target]]` to the note whose display title equals the
+     * trimmed target (case-insensitive); `None` means the caller creates a
+     * note with the target as content, mirroring the desktop flow.
+     */
+    fun `wikiResolve`(`target`: kotlin.String): NoteSnapshot?
+    
+    /**
+     * Ranked wiki autocomplete for `query` (fuzzy on display titles,
+     * at most 8, same order as desktop). Empty queries list notes
+     * alphabetically.
+     */
+    fun `wikiSuggest`(`query`: kotlin.String): List<WikiCandidate>
+    
     companion object
 }
 
@@ -1657,6 +1706,44 @@ open class NvStorage: Disposable, AutoCloseable, NvStorageInterface
     
 
     
+    /**
+     * Resolve a `[[target]]` to the note whose display title equals the
+     * trimmed target (case-insensitive); `None` means the caller creates a
+     * note with the target as content, mirroring the desktop flow.
+     */override fun `wikiResolve`(`target`: kotlin.String): NoteSnapshot? {
+            return FfiConverterOptionalTypeNoteSnapshot.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_nv_core_fn_method_nvstorage_wiki_resolve(
+        it,
+        
+        FfiConverterString.lower(`target`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * Ranked wiki autocomplete for `query` (fuzzy on display titles,
+     * at most 8, same order as desktop). Empty queries list notes
+     * alphabetically.
+     */override fun `wikiSuggest`(`query`: kotlin.String): List<WikiCandidate> {
+            return FfiConverterSequenceTypeWikiCandidate.lift(
+    callWithHandle {
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_nv_core_fn_method_nvstorage_wiki_suggest(
+        it,
+        
+        FfiConverterString.lower(`query`),_status)
+}
+    }
+    )
+    }
+    
+
+    
 
     
 
@@ -1768,6 +1855,107 @@ public object FfiConverterTypeNoteSnapshot: FfiConverterRustBuffer<NoteSnapshot>
             FfiConverterSequenceString.write(value.`tags`, buf)
             FfiConverterLong.write(value.`modifiedMs`, buf)
             FfiConverterLong.write(value.`createdMs`, buf)
+    }
+}
+
+
+
+/**
+ * FFI-safe autocomplete candidate: note identity plus what the UI shows
+ * (display title = first content line, raw tag list, 4-line preview).
+ * Parity slice 3; ranked by `crate::wiki::suggest_wiki_candidates`.
+ */
+data class WikiCandidate (
+    var `id`: kotlin.String
+    , 
+    var `displayTitle`: kotlin.String
+    , 
+    var `tags`: List<kotlin.String>
+    , 
+    var `preview`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeWikiCandidate: FfiConverterRustBuffer<WikiCandidate> {
+    override fun read(buf: ByteBuffer): WikiCandidate {
+        return WikiCandidate(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterSequenceString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: WikiCandidate) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`displayTitle`) +
+            FfiConverterSequenceString.allocationSize(value.`tags`) +
+            FfiConverterString.allocationSize(value.`preview`)
+    )
+
+    override fun write(value: WikiCandidate, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`displayTitle`, buf)
+            FfiConverterSequenceString.write(value.`tags`, buf)
+            FfiConverterString.write(value.`preview`, buf)
+    }
+}
+
+
+
+/**
+ * FFI-safe view of a closed `[[target]]` hit: trimmed target plus byte
+ * offsets over the source text (parity slice 3; same semantics as the old
+ * desktop extractor, now in `crate::wiki`).
+ */
+data class WikiLink (
+    var `target`: kotlin.String
+    , 
+    var `start`: kotlin.ULong
+    , 
+    var `end`: kotlin.ULong
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeWikiLink: FfiConverterRustBuffer<WikiLink> {
+    override fun read(buf: ByteBuffer): WikiLink {
+        return WikiLink(
+            FfiConverterString.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: WikiLink) = (
+            FfiConverterString.allocationSize(value.`target`) +
+            FfiConverterULong.allocationSize(value.`start`) +
+            FfiConverterULong.allocationSize(value.`end`)
+    )
+
+    override fun write(value: WikiLink, buf: ByteBuffer) {
+            FfiConverterString.write(value.`target`, buf)
+            FfiConverterULong.write(value.`start`, buf)
+            FfiConverterULong.write(value.`end`, buf)
     }
 }
 
@@ -1885,6 +2073,102 @@ public object FfiConverterTypeNvError : FfiConverterRustBuffer<NvException> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?> {
+    override fun read(buf: ByteBuffer): kotlin.String? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterString.read(buf)
+    }
+
+    override fun allocationSize(value: kotlin.String?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterString.allocationSize(value)
+        }
+    }
+
+    override fun write(value: kotlin.String?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterString.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeNoteSnapshot: FfiConverterRustBuffer<NoteSnapshot?> {
+    override fun read(buf: ByteBuffer): NoteSnapshot? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeNoteSnapshot.read(buf)
+    }
+
+    override fun allocationSize(value: NoteSnapshot?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeNoteSnapshot.allocationSize(value)
+        }
+    }
+
+    override fun write(value: NoteSnapshot?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeNoteSnapshot.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeWikiLink: FfiConverterRustBuffer<WikiLink?> {
+    override fun read(buf: ByteBuffer): WikiLink? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeWikiLink.read(buf)
+    }
+
+    override fun allocationSize(value: WikiLink?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeWikiLink.allocationSize(value)
+        }
+    }
+
+    override fun write(value: WikiLink?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeWikiLink.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
     override fun read(buf: ByteBuffer): List<kotlin.String> {
         val len = buf.getInt()
@@ -1934,4 +2218,105 @@ public object FfiConverterSequenceTypeNoteSnapshot: FfiConverterRustBuffer<List<
         }
     }
 }
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeWikiCandidate: FfiConverterRustBuffer<List<WikiCandidate>> {
+    override fun read(buf: ByteBuffer): List<WikiCandidate> {
+        val len = buf.getInt()
+        return List<WikiCandidate>(len) {
+            FfiConverterTypeWikiCandidate.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<WikiCandidate>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeWikiCandidate.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<WikiCandidate>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeWikiCandidate.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeWikiLink: FfiConverterRustBuffer<List<WikiLink>> {
+    override fun read(buf: ByteBuffer): List<WikiLink> {
+        val len = buf.getInt()
+        return List<WikiLink>(len) {
+            FfiConverterTypeWikiLink.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<WikiLink>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeWikiLink.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<WikiLink>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeWikiLink.write(it, buf)
+        }
+    }
+}
+        /**
+         * Every closed `[[target]]` in `text`, in document order.
+         */ fun `extractWikiLinks`(`text`: kotlin.String): List<WikiLink> {
+            return FfiConverterSequenceTypeWikiLink.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_nv_core_fn_func_extract_wiki_links(
+    
+        
+        FfiConverterString.lower(`text`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Closed link under a cursor given in chars (`None` when there is none or
+         * the cursor is out of range). Drives the follow-link affordance.
+         */ fun `linkAtCursor`(`text`: kotlin.String, `cursorChars`: kotlin.ULong): WikiLink? {
+            return FfiConverterOptionalTypeWikiLink.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_nv_core_fn_func_link_at_cursor(
+    
+        
+        FfiConverterString.lower(`text`),
+        FfiConverterULong.lower(`cursorChars`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Pending `[[query` on the current line up to the cursor (`None` when
+         * there is none or it is already closed). Drives the autocomplete panel.
+         */ fun `openWikiQuery`(`lineBeforeCursor`: kotlin.String): kotlin.String? {
+            return FfiConverterOptionalString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.uniffi_nv_core_fn_func_open_wiki_query(
+    
+        
+        FfiConverterString.lower(`lineBeforeCursor`),_status)
+}
+    )
+    }
+    
+
 

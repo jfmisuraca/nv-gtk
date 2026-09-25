@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,9 +19,11 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
@@ -35,6 +38,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,6 +58,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -62,6 +67,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.nv_core.NoteSnapshot
 import uniffi.nv_core.NvStorage
+import uniffi.nv_core.WikiCandidate
+import uniffi.nv_core.WikiLink
+import uniffi.nv_core.linkAtCursor
+import uniffi.nv_core.openWikiQuery
 
 /**
  * Content editor. The title is editable in place (tap it): confirming calls
@@ -77,13 +86,18 @@ fun NoteEditorScreen(
     windowSizeClass: WindowSizeClass,
     autoFocusKeyboard: Boolean = false,
     onDone: () -> Unit,
-    onRenamed: (NoteSnapshot) -> Unit
+    onRenamed: (NoteSnapshot) -> Unit,
+    onFollowLink: (String) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val editorFieldLabel = stringResource(R.string.editor_field_label)
     val titleFieldLabel = stringResource(R.string.title_field_label)
     val emptyTitle = stringResource(R.string.note_empty_title)
-    val textFieldState = rememberTextFieldState(initialText = note.content)
+    val noMatches = stringResource(R.string.wiki_no_matches)
+    val suggestionsLabel = stringResource(R.string.wiki_suggestions_label)
+    // Keyed on the note id so following a wiki-link into another note (same
+    // route, new note) resets the field instead of keeping stale text.
+    val textFieldState = remember(note.id) { TextFieldState(note.content) }
     val density = LocalDensity.current
     val imeBottom = WindowInsets.ime.getBottom(density)
     var error by remember { mutableStateOf<String?>(null) }
@@ -93,6 +107,54 @@ fun NoteEditorScreen(
     var savedText by remember(note.id) { mutableStateOf(note.content) }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+
+    // Wiki-links (parity slice 3, rules in nv-core): pending `[[query`
+    // autocompletion plus a follow chip on closed `[[link]]` under cursor.
+    // `openWikiQuery` runs on one line (main-thread cheap); ranking and the
+    // cursor lookup run on IO because they scan the whole note/storage.
+    val fullText = textFieldState.text.toString()
+    val cursorPos = textFieldState.selection.start.coerceIn(0, fullText.length)
+    val openQuery = remember(fullText, cursorPos) {
+        runCatching { openWikiQuery(lineBeforeCursor(fullText, cursorPos)) }.getOrNull()
+    }
+    var suggestions by remember { mutableStateOf<List<WikiCandidate>>(emptyList()) }
+    LaunchedEffect(openQuery) {
+        val q = openQuery
+        suggestions = if (q == null) {
+            emptyList()
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching { storage.wikiSuggest(q) }.getOrDefault(emptyList())
+            }
+        }
+    }
+    var activeLink by remember { mutableStateOf<WikiLink?>(null) }
+    LaunchedEffect(fullText, cursorPos) {
+        // Kotlin offsets are UTF-16; the core counts Unicode scalars, so the
+        // cursor is converted (never panics, degrades to no-chip on error).
+        val cursorChars = runCatching {
+            fullText.codePointCount(0, cursorPos).toULong()
+        }.getOrNull()
+        activeLink = if (cursorChars == null) {
+            null
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching { linkAtCursor(fullText, cursorChars) }.getOrNull()
+            }
+        }
+    }
+
+    // Insert the chosen candidate over the pending `[[query` (desktop parity:
+    // brackets are kept, the display title is closed with `]]`).
+    fun acceptCandidate(candidate: WikiCandidate) {
+        val q = openQuery ?: return
+        val cur = textFieldState.selection.start.coerceIn(0, textFieldState.text.length)
+        val start = pendingWikiStart(cur, q).coerceAtMost(cur)
+        textFieldState.edit {
+            replace(start, cur, candidate.displayTitle + "]]")
+            selection = TextRange(start + candidate.displayTitle.length + 2)
+        }
+    }
 
     // Auto-open the keyboard only when a brand-new note was just created, so
     // editing can start immediately. Already-existing notes keep their default
@@ -255,6 +317,65 @@ fun NoteEditorScreen(
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(bottom = 8.dp)
                     )
+                }
+                // Follow-chip: the cursor sits on a closed `[[link]]`.
+                // Opens the existing note or creates it (desktop flow).
+                AnimatedVisibility(visible = activeLink != null) {
+                    val link = activeLink
+                    if (link != null) {
+                        Text(
+                            text = stringResource(R.string.wiki_open_link, link.target),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .padding(bottom = 8.dp)
+                                .clickable { onFollowLink(link.target) }
+                        )
+                    }
+                }
+                // Autocomplete panel for a pending `[[query` (core-ranked).
+                AnimatedVisibility(visible = openQuery != null) {
+                    ElevatedCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                            .semantics { contentDescription = suggestionsLabel }
+                    ) {
+                        if (suggestions.isEmpty()) {
+                            Text(
+                                noMatches,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        } else {
+                            LazyColumn(Modifier.heightIn(max = 240.dp)) {
+                                items(suggestions, key = { it.id }) { candidate ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { acceptCandidate(candidate) }
+                                            .padding(
+                                                horizontal = 12.dp,
+                                                vertical = 8.dp
+                                            )
+                                    ) {
+                                        Text(
+                                            candidate.displayTitle,
+                                            style = MaterialTheme.typography.titleSmall,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        if (candidate.tags.isNotEmpty()) {
+                                            Text(
+                                                candidate.tags.joinToString(" ") { "#$it" },
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 OutlinedTextField(
                     state = textFieldState,
