@@ -175,6 +175,49 @@ fn rebuild_trash_rows(
     }
 }
 
+// Fuente única de atajos de ventana (scope de módulo para que los tests la
+// vean): esta tabla REGISTRA cada binding (el handler despacha por `action`)
+// y a la vez DOCUMENTA el cheatsheet (la ventana se renderiza de acá).
+// Agregar un atajo = agregar una fila; el test
+// `window_shortcuts_table_is_consistent` impide combos duplicados y acciones
+// sin documentar.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ShortcutAction {
+    NextNote,
+    PrevNote,
+    FocusSearch,
+    NewNote,
+    DeleteNote,
+    OpenTrash,
+    RenameNote,
+    ThemePicker,
+    OpenShortcuts,
+    EscapeContextual,
+}
+
+struct WindowShortcut {
+    key: Key,
+    with_ctrl: bool,
+    section: &'static str,
+    keys_label: &'static str,
+    description: &'static str,
+    action: ShortcutAction,
+}
+
+const WINDOW_SHORTCUTS: &[WindowShortcut] = &[
+    WindowShortcut { key: Key::j, with_ctrl: true, section: "Generales", keys_label: "Ctrl+J", description: "Nota siguiente", action: ShortcutAction::NextNote },
+    WindowShortcut { key: Key::k, with_ctrl: true, section: "Generales", keys_label: "Ctrl+K", description: "Nota anterior", action: ShortcutAction::PrevNote },
+    WindowShortcut { key: Key::l, with_ctrl: true, section: "Generales", keys_label: "Ctrl+L", description: "Ir al buscador", action: ShortcutAction::FocusSearch },
+    WindowShortcut { key: Key::f, with_ctrl: true, section: "Generales", keys_label: "Ctrl+F", description: "Ir al buscador", action: ShortcutAction::FocusSearch },
+    WindowShortcut { key: Key::n, with_ctrl: true, section: "Generales", keys_label: "Ctrl+N", description: "Nota nueva", action: ShortcutAction::NewNote },
+    WindowShortcut { key: Key::d, with_ctrl: true, section: "Generales", keys_label: "Ctrl+D", description: "Mover la nota actual a la papelera", action: ShortcutAction::DeleteNote },
+    WindowShortcut { key: Key::t, with_ctrl: true, section: "Generales", keys_label: "Ctrl+T", description: "Abrir la papelera", action: ShortcutAction::OpenTrash },
+    WindowShortcut { key: Key::r, with_ctrl: true, section: "Generales", keys_label: "Ctrl+R", description: "Renombrar la nota actual", action: ShortcutAction::RenameNote },
+    WindowShortcut { key: Key::p, with_ctrl: true, section: "Generales", keys_label: "Ctrl+P", description: "Selector de tema", action: ShortcutAction::ThemePicker },
+    WindowShortcut { key: Key::question, with_ctrl: true, section: "Generales", keys_label: "Ctrl+?", description: "Mostrar esta ventana", action: ShortcutAction::OpenShortcuts },
+    WindowShortcut { key: Key::Escape, with_ctrl: false, section: "Generales", keys_label: "Esc", description: "Cerrar panel / ir al buscador", action: ShortcutAction::EscapeContextual },
+];
+
 pub fn build_ui(app: &Application) -> UiHandles {
     let config = Config::load();
     // Aplica el tema guardado antes de construir la ventana para que cada
@@ -342,6 +385,116 @@ pub fn build_ui(app: &Application) -> UiHandles {
         });
         theme_list.append(&item);
     }
+
+    // Ventana de atajos de teclado: botón en la esquina inferior izquierda
+    // del pie + Ctrl+?. Reutiliza el patrón del diálogo de papelera.
+    // Tabla de atajos en scope de módulo (arriba): el handler despacha por
+    // `action` y el cheatsheet se renderiza de la misma tabla.
+
+    // Atajos del editor (controller propio en wiki_autocomplete.rs, activos
+    // solo con sugerencias): contenido estático del cheatsheet.
+    const EDITOR_SHORTCUTS: &[(&str, &str)] = &[
+        ("Enter / Tab", "Insertar la sugerencia [[ ]]"),
+        ("↑ / ↓", "Navegar las sugerencias"),
+        ("Ctrl+Enter", "Seguir el enlace bajo el cursor"),
+        ("Ctrl+Mayús+Enter", "Crear nota desde la búsqueda"),
+        ("Esc", "Cerrar las sugerencias"),
+    ];
+
+    fn append_section_header(parent: &GtkBox, title: &str) {
+        let header = Label::new(Some(title));
+        header.set_halign(Align::Start);
+        header.add_css_class("dim-label");
+        parent.append(&header);
+    }
+
+    fn append_shortcut_row(parent: &GtkBox, keys: &str, description: &str) {
+        let row = GtkBox::new(Orientation::Horizontal, 12);
+        let keys_label = Label::new(Some(keys));
+        keys_label.set_halign(Align::Start);
+        keys_label.set_width_chars(20);
+        let action_label = Label::new(Some(description));
+        action_label.set_halign(Align::Start);
+        action_label.set_hexpand(true);
+        action_label.set_wrap(true);
+        row.append(&keys_label);
+        row.append(&action_label);
+        parent.append(&row);
+    }
+
+    let open_shortcuts: Rc<dyn Fn()> = Rc::new({
+        let window = window.clone();
+        move || {
+            let dialog = Window::builder()
+                .transient_for(&window)
+                .modal(true)
+                .title("Atajos de teclado")
+                .default_width(440)
+                .default_height(480)
+                .build();
+
+            let vbox = GtkBox::new(Orientation::Vertical, 6);
+            vbox.set_margin_top(12);
+            vbox.set_margin_bottom(12);
+            vbox.set_margin_start(12);
+            vbox.set_margin_end(12);
+            dialog.set_child(Some(&vbox));
+
+            let scroll = ScrolledWindow::builder().vexpand(true).build();
+            vbox.append(&scroll);
+            let list = GtkBox::new(Orientation::Vertical, 8);
+            scroll.set_child(Some(&list));
+
+            // Secciones y filas salen de WINDOW_SHORTCUTS: lo que no está en
+            // la tabla no existe como atajo ni como documentación.
+            let mut last_section = "";
+            for sc in WINDOW_SHORTCUTS {
+                if sc.section != last_section {
+                    last_section = sc.section;
+                    append_section_header(&list, sc.section);
+                }
+                append_shortcut_row(&list, sc.keys_label, sc.description);
+            }
+            append_section_header(&list, "Editor");
+            for &(keys, description) in EDITOR_SHORTCUTS {
+                append_shortcut_row(&list, keys, description);
+            }
+
+            let bottom = GtkBox::new(Orientation::Horizontal, 6);
+            bottom.set_halign(Align::End);
+            let close_btn = Button::with_label("Cerrar");
+            bottom.append(&close_btn);
+            vbox.append(&bottom);
+            {
+                let dialog_c = dialog.clone();
+                close_btn.connect_clicked(move |_| {
+                    dialog_c.close();
+                });
+            }
+
+            // Keyboard: Esc closes the shortcuts window.
+            let esc_controller = EventControllerKey::new();
+            let dialog_c = dialog.clone();
+            esc_controller.connect_key_pressed(move |_, key, _, _| {
+                if key == Key::Escape {
+                    dialog_c.close();
+                    glib::Propagation::Stop
+                } else {
+                    glib::Propagation::Proceed
+                }
+            });
+            dialog.add_controller(esc_controller);
+
+            dialog.present();
+        }
+    });
+    let shortcuts_button = Button::from_icon_name("input-keyboard-symbolic");
+    shortcuts_button.set_tooltip_text(Some("Atajos de teclado (Ctrl+?)"));
+    {
+        let open_shortcuts_c = Rc::clone(&open_shortcuts);
+        shortcuts_button.connect_clicked(move |_| open_shortcuts_c());
+    }
+    status_box.prepend(&shortcuts_button);
 
     editor_box.append(&status_box);
 
@@ -1229,51 +1382,32 @@ pub fn build_ui(app: &Application) -> UiHandles {
         let open_trash_dialog = open_trash_dialog.clone();
         let rename_current_note = rename_current_note.clone();
         let move_list_selection = move_list_selection.clone();
+        let open_shortcuts = Rc::clone(&open_shortcuts);
         let theme_button = theme_button.clone();
 
         move |_, key, _, modifier| {
             let is_ctrl = modifier.contains(gdk::ModifierType::CONTROL_MASK);
 
-            match key {
-                Key::j if is_ctrl => {
-                    move_list_selection(1);
-                    glib::Propagation::Stop
-                }
-                Key::k if is_ctrl => {
-                    move_list_selection(-1);
-                    glib::Propagation::Stop
-                }
-                Key::l if is_ctrl => {
+            let Some(hit) = WINDOW_SHORTCUTS
+                .iter()
+                .find(|s| s.key == key && s.with_ctrl == is_ctrl)
+            else {
+                return glib::Propagation::Proceed;
+            };
+            match hit.action {
+                ShortcutAction::NextNote => move_list_selection(1),
+                ShortcutAction::PrevNote => move_list_selection(-1),
+                ShortcutAction::FocusSearch => {
                     search_entry.grab_focus();
                     search_entry.select_region(0, -1);
-                    glib::Propagation::Stop
                 }
-                Key::f if is_ctrl => {
-                    search_entry.grab_focus();
-                    search_entry.select_region(0, -1);
-                    glib::Propagation::Stop
-                }
-                Key::n if is_ctrl => {
-                    create_new_empty_note();
-                    glib::Propagation::Stop
-                }
-                Key::d if is_ctrl => {
-                    delete_current_note();
-                    glib::Propagation::Stop
-                }
-                Key::t if is_ctrl => {
-                    open_trash_dialog();
-                    glib::Propagation::Stop
-                }
-                Key::r if is_ctrl => {
-                    rename_current_note();
-                    glib::Propagation::Stop
-                }
-                Key::p if is_ctrl => {
-                    theme_button.popup();
-                    glib::Propagation::Stop
-                }
-                Key::Escape => {
+                ShortcutAction::NewNote => create_new_empty_note(),
+                ShortcutAction::DeleteNote => delete_current_note(),
+                ShortcutAction::OpenTrash => open_trash_dialog(),
+                ShortcutAction::RenameNote => rename_current_note(),
+                ShortcutAction::ThemePicker => theme_button.popup(),
+                ShortcutAction::OpenShortcuts => open_shortcuts(),
+                ShortcutAction::EscapeContextual => {
                     // En vertical, Esc cierra el overlay de resultados si está
                     // visible; si no, enfoca el buscador (comportamiento previo).
                     if is_portrait.get() && results_panel.is_visible() {
@@ -1283,10 +1417,9 @@ pub fn build_ui(app: &Application) -> UiHandles {
                         search_entry.grab_focus();
                         search_entry.select_region(0, -1);
                     }
-                    glib::Propagation::Stop
                 }
-                _ => glib::Propagation::Proceed,
             }
+            glib::Propagation::Stop
         }
     });
 
@@ -1354,6 +1487,46 @@ mod tests {
         assert!(results_overlay_visible(true, true, "proy"));
         assert!(results_overlay_visible(true, false, "proy"));
         assert!(results_overlay_visible(true, false, "  x"));
+    }
+
+    #[test]
+    fn window_shortcuts_table_is_consistent() {
+        // Sin combos duplicados: dos filas nunca pueden reclamar la misma tecla.
+        for (i, a) in WINDOW_SHORTCUTS.iter().enumerate() {
+            for b in &WINDOW_SHORTCUTS[i + 1..] {
+                assert!(
+                    !(a.key == b.key && a.with_ctrl == b.with_ctrl),
+                    "atajo duplicado en WINDOW_SHORTCUTS"
+                );
+            }
+        }
+        // Toda acción tiene al menos una fila: lo que se ejecuta se documenta.
+        // (Al agregar una variante a ShortcutAction, agregarla también acá.)
+        for action in [
+            ShortcutAction::NextNote,
+            ShortcutAction::PrevNote,
+            ShortcutAction::FocusSearch,
+            ShortcutAction::NewNote,
+            ShortcutAction::DeleteNote,
+            ShortcutAction::OpenTrash,
+            ShortcutAction::RenameNote,
+            ShortcutAction::ThemePicker,
+            ShortcutAction::OpenShortcuts,
+            ShortcutAction::EscapeContextual,
+        ] {
+            assert!(
+                WINDOW_SHORTCUTS.iter().any(|s| s.action == action),
+                "acción sin fila en WINDOW_SHORTCUTS: {action:?}"
+            );
+        }
+        // Filas con contenido para el cheatsheet.
+        for sc in WINDOW_SHORTCUTS {
+            assert!(
+                !sc.section.is_empty()
+                    && !sc.keys_label.is_empty()
+                    && !sc.description.is_empty()
+            );
+        }
     }
 
     // Requiere display: `xvfb-run -a cargo test -- --test-threads=1`
