@@ -73,6 +73,13 @@ import uniffi.nv_core.linkAtCursor
 import uniffi.nv_core.openWikiQuery
 
 /**
+ * Minimum touch-target height for the wiki UI (Material guidance: 48dp).
+ * Shared by the follow-chip and the suggestion rows so a finger-width change
+ * in one place cannot shrink the other below the minimum.
+ */
+internal val WikiTouchTargetMinHeight = 48.dp
+
+/**
  * Content editor. The title is editable in place (tap it): confirming calls
  * the core rename API, which may disambiguate on collisions. Content
  * autosaves write-through (no debounce tail to lose on a fast system back);
@@ -320,16 +327,24 @@ fun NoteEditorScreen(
                 }
                 // Follow-chip: the cursor sits on a closed `[[link]]`.
                 // Opens the existing note or creates it (desktop flow).
+                // T6: full-width 48dp touch target (Material minimum) so the
+                // chip is comfortable to tap; text stays start-aligned.
                 AnimatedVisibility(visible = activeLink != null) {
                     val link = activeLink
                     if (link != null) {
-                        Text(
-                            text = stringResource(R.string.wiki_open_link, link.target),
-                            color = MaterialTheme.colorScheme.primary,
+                        Box(
                             modifier = Modifier
-                                .padding(bottom = 8.dp)
-                                .clickable { onFollowLink(link.target) }
-                        )
+                                .fillMaxWidth()
+                                .heightIn(min = WikiTouchTargetMinHeight)
+                                .clickable(role = Role.Button) { onFollowLink(link.target) }
+                                .padding(bottom = 8.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            Text(
+                                text = stringResource(R.string.wiki_open_link, link.target),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
                 // Autocomplete panel for a pending `[[query` (core-ranked).
@@ -350,14 +365,19 @@ fun NoteEditorScreen(
                         } else {
                             LazyColumn(Modifier.heightIn(max = 240.dp)) {
                                 items(suggestions, key = { it.id }) { candidate ->
+                                    // T6: 48dp minimum touch height (Material),
+                                    // content vertically centered so short
+                                    // single-line titles still fill the row.
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .heightIn(min = WikiTouchTargetMinHeight)
                                             .clickable { acceptCandidate(candidate) }
                                             .padding(
                                                 horizontal = 12.dp,
                                                 vertical = 8.dp
-                                            )
+                                            ),
+                                        verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
                                             candidate.displayTitle,

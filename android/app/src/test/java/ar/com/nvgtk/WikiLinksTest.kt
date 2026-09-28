@@ -1,5 +1,6 @@
 package ar.com.nvgtk
 
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -50,5 +51,11 @@ class WikiLinksTest {
         val (text, cursor) = insertWikiCompletion("a [[ resto", 4, "", "beta")
         assertEquals("a [[beta]] resto", text)
         assertEquals(10, cursor)
+    }
+
+    @Test
+    fun wikiTouchTarget_meetsMaterialMinimum() {
+        // T6: suggestion rows + follow-chip share this minimum (Material 48dp).
+        assertEquals(48.dp, WikiTouchTargetMinHeight)
     }
 }
