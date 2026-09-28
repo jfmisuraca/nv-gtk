@@ -23,16 +23,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.OutputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material.icons.Icons
@@ -69,6 +73,7 @@ import uniffi.nv_core.NoteSnapshot
 import uniffi.nv_core.NvStorage
 import uniffi.nv_core.WikiCandidate
 import uniffi.nv_core.WikiLink
+import uniffi.nv_core.extractWikiLinks
 import uniffi.nv_core.linkAtCursor
 import uniffi.nv_core.openWikiQuery
 
@@ -123,6 +128,34 @@ fun NoteEditorScreen(
     val cursorPos = textFieldState.selection.start.coerceIn(0, fullText.length)
     val openQuery = remember(fullText, cursorPos) {
         runCatching { openWikiQuery(lineBeforeCursor(fullText, cursorPos)) }.getOrNull()
+    }
+    // Wiki highlight (feature wiki-highlight T2): closed `[[...]]` ranges
+    // render underlined/blue (desktop parity `#4A9EFF`). The FFI scan runs
+    // here in `remember(fullText)` — never inside `transformOutput` (layout
+    // thread) — and the transformation itself is style-only (`addStyle`, no
+    // insert/replace), so saved text stays raw `[[...]]`. An open `[[query`
+    // yields no ranges upstream, hence no highlight.
+    val highlightRanges = remember(fullText) {
+        runCatching {
+            wikiHighlightRanges(
+                fullText,
+                extractWikiLinks(fullText).map { it.start.toLong() to it.end.toLong() }
+            )
+        }.getOrDefault(emptyList())
+    }
+    val wikiHighlightTransformation = remember(highlightRanges) {
+        OutputTransformation {
+            for (range in highlightRanges) {
+                addStyle(
+                    SpanStyle(
+                        color = Color(0xFF4A9EFF),
+                        textDecoration = TextDecoration.Underline
+                    ),
+                    range.start,
+                    range.end
+                )
+            }
+        }
     }
     var activeLink by remember { mutableStateOf<WikiLink?>(null) }
     LaunchedEffect(fullText, cursorPos) {
@@ -405,6 +438,7 @@ fun NoteEditorScreen(
                 }
                 OutlinedTextField(
                     state = textFieldState,
+                    outputTransformation = wikiHighlightTransformation,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
