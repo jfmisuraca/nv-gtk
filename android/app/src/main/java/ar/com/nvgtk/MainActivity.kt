@@ -64,6 +64,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavOptionsBuilder
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import kotlinx.coroutines.Dispatchers
@@ -100,6 +101,21 @@ internal fun editorRoute(noteId: String): String = "editor/$noteId"
 /** T7: trimmed link target, or null when blank (nothing to follow). */
 internal fun cleanWikiTarget(target: String): String? =
     target.trim().takeIf { it.isNotEmpty() }
+
+/** T7-fix: THE options object every `navigate()` to an editor route uses
+ * (passed as `::applyEditorNavOptions`, so the regression test locks the
+ * real call's options, not a copy). One entry per note: `launchSingleTop`
+ * would reuse the top entry and flatten A→B; any `popUpTo` would drop A;
+ * both would turn back from B into back-to-lista. */
+internal fun applyEditorNavOptions(options: NavOptionsBuilder) {
+    options.launchSingleTop = false
+    options.restoreState = false
+}
+
+/** T7-fix: follow-link routing decision used verbatim by `followWikiLink`.
+ * Returns the route to push, or null for a self-link (stay in place). */
+internal fun editorFollowRoute(currentId: String?, targetId: String): String? =
+    if (targetId == currentId) null else editorRoute(targetId)
 
 class MainActivity : ComponentActivity() {
 
@@ -167,6 +183,11 @@ private fun NvApp(
     // note instead of a shared value overwritten by the last navigation).
     var editorSnapshots by remember { mutableStateOf<Map<String, NoteSnapshot>>(emptyMap()) }
     var editorAutoFocus by remember { mutableStateOf(false) }
+    // T7-fix: true once storage data has loaded. The editor entry below
+    // self-pops only when this is true AND its id is still unknown; before
+    // the first load (e.g. activity recreation restores the NavController
+    // stack while notes reload) entries must wait, not pop.
+    var notesLoaded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<NoteSnapshot>?>(null) }
@@ -181,7 +202,14 @@ private fun NvApp(
             }
         }.onSuccess { (freshNotes, freshTrash, freshResults) ->
             notes = freshNotes; trash = freshTrash; results = freshResults; error = null
-        }.onFailure { error = it.message }
+            notesLoaded = true
+        }.onFailure {
+            error = it.message
+            // A failed load will not resolve entries later, so let unknown
+            // ids fall through to the list (which shows the error) instead
+            // of waiting on a blank frame forever.
+            notesLoaded = true
+        }
     }
 
     fun ioOp(block: suspend () -> Unit) {
@@ -230,8 +258,9 @@ private fun NvApp(
                 editorAutoFocus = false
                 val currentId = navController.currentBackStackEntry
                     ?.arguments?.getString("noteId")
-                if (snap.id != currentId) {
-                    navController.navigate(editorRoute(snap.id))
+                val route = editorFollowRoute(currentId, snap.id)
+                if (route != null) {
+                    navController.navigate(route, ::applyEditorNavOptions)
                 }
                 refresh()
             }.onFailure { error = it.message }
@@ -264,7 +293,7 @@ private fun NvApp(
                     (results ?: notes).firstOrNull { it.id == id }?.let { found ->
                         editorSnapshots = editorSnapshots + (found.id to found)
                         editorAutoFocus = false
-                        navController.navigate(editorRoute(found.id))
+                        navController.navigate(editorRoute(found.id), ::applyEditorNavOptions)
                     }
                 },
                 onQueryChange = { query = it },
@@ -288,7 +317,7 @@ private fun NvApp(
                         created.onSuccess { note ->
                             editorSnapshots = editorSnapshots + (note.id to note)
                             editorAutoFocus = true // auto-open the keyboard only on the brand-new note
-                            navController.navigate(editorRoute(note.id))
+                            navController.navigate(editorRoute(note.id), ::applyEditorNavOptions)
                             refresh()
                         }.onFailure { error = it.message }
                     }
@@ -312,7 +341,15 @@ private fun NvApp(
                 ?: notes.firstOrNull { it.id == noteId }
                 ?: results?.firstOrNull { it.id == noteId }
             if (note == null) {
-                LaunchedEffect(Unit) { navController.popBackStack() }
+                // T7-fix: pop ONLY once storage data has loaded and the id is
+                // still unknown (e.g. a deleted note). While loading — notably
+                // after activity recreation, when rememberNavController
+                // restores entries but snapshots/notes are not back yet — the
+                // entry waits instead of popping itself: popping here collapses
+                // valid entries to lista and back can never return to them.
+                if (notesLoaded) {
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                }
                 return@composable
             }
             NoteEditorScreen(
