@@ -124,17 +124,6 @@ fun NoteEditorScreen(
     val openQuery = remember(fullText, cursorPos) {
         runCatching { openWikiQuery(lineBeforeCursor(fullText, cursorPos)) }.getOrNull()
     }
-    var suggestions by remember { mutableStateOf<List<WikiCandidate>>(emptyList()) }
-    LaunchedEffect(openQuery) {
-        val q = openQuery
-        suggestions = if (q == null) {
-            emptyList()
-        } else {
-            withContext(Dispatchers.IO) {
-                runCatching { storage.wikiSuggest(q) }.getOrDefault(emptyList())
-            }
-        }
-    }
     var activeLink by remember { mutableStateOf<WikiLink?>(null) }
     LaunchedEffect(fullText, cursorPos) {
         // Kotlin offsets are UTF-16; the core counts Unicode scalars, so the
@@ -147,6 +136,20 @@ fun NoteEditorScreen(
         } else {
             withContext(Dispatchers.IO) {
                 runCatching { linkAtCursor(fullText, cursorChars) }.getOrNull()
+            }
+        }
+    }
+    var suggestions by remember { mutableStateOf<List<WikiCandidate>>(emptyList()) }
+    // T8: a cursor inside a closed `[[link]]` still yields a partial open
+    // query (the core only sees the line before the cursor), so the fetch is
+    // also suppressed while a closed link is under the cursor — follow wins.
+    LaunchedEffect(openQuery, activeLink) {
+        val q = openQuery
+        suggestions = if (q == null || activeLink != null) {
+            emptyList()
+        } else {
+            withContext(Dispatchers.IO) {
+                runCatching { storage.wikiSuggest(q) }.getOrDefault(emptyList())
             }
         }
     }
@@ -348,7 +351,10 @@ fun NoteEditorScreen(
                     }
                 }
                 // Autocomplete panel for a pending `[[query` (core-ranked).
-                AnimatedVisibility(visible = openQuery != null) {
+                // T8: hidden while a closed `[[link]]` is under the cursor —
+                // the follow-chip above owns that state (desktop parity:
+                // closed link navigates, only an open trigger autocompletes).
+                AnimatedVisibility(visible = shouldShowWikiAutocomplete(openQuery, activeLink != null)) {
                     ElevatedCard(
                         modifier = Modifier
                             .fillMaxWidth()

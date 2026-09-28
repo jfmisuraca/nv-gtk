@@ -58,4 +58,27 @@ class WikiLinksTest {
         // T6: suggestion rows + follow-chip share this minimum (Material 48dp).
         assertEquals(48.dp, WikiTouchTargetMinHeight)
     }
+
+    @Test
+    fun autocomplete_showsForOpenTriggerOnly() {
+        // `[[query` without `]]`: core open query fires, no closed link.
+        assertEquals(true, shouldShowWikiAutocomplete("query", false))
+        // Bare `[[`: empty query still opens the panel.
+        assertEquals(true, shouldShowWikiAutocomplete("", false))
+    }
+
+    @Test
+    fun autocomplete_hiddenOnClosedLink_followWins() {
+        // T8 regression: cursor inside `[[cl|osed]]` yields a partial open
+        // query ("cl") AND a closed link — follow-chip wins, no suggestions.
+        assertEquals(false, shouldShowWikiAutocomplete("cl", true))
+        // Cursor just after `[[closed]]`: no open query, link under cursor.
+        assertEquals(false, shouldShowWikiAutocomplete(null, true))
+    }
+
+    @Test
+    fun autocomplete_hiddenWithoutTrigger() {
+        // Plain text (no `[[` before cursor): neither UI shows.
+        assertEquals(false, shouldShowWikiAutocomplete(null, false))
+    }
 }

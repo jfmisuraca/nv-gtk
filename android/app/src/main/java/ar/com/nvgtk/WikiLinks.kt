@@ -19,6 +19,17 @@ fun lineBeforeCursor(text: String, cursor: Int): String {
 }
 
 /**
+ * T8: autocomplete visibility gate. The core `openWikiQuery` only sees the
+ * line BEFORE the cursor, so a cursor inside a closed `[[link]]` still
+ * yields a partial query (e.g. `[[cl|osed]]` → `Some("cl")`). The core
+ * `linkAtCursor` fires there too, and desktop semantics give follow priority:
+ * a closed link navigates, only an open trigger autocompletes. So the panel
+ * shows only for an open query with NO closed link under the cursor.
+ */
+fun shouldShowWikiAutocomplete(openQuery: String?, hasActiveLink: Boolean): Boolean =
+    openQuery != null && !hasActiveLink
+
+/**
  * Offset just after the pending `[[` for [cursor] (mirrors the desktop
  * `start_offset`): the `[[` itself is kept, the query after it is replaced.
  * Callers guarantee [query] is the core trigger result for this cursor.
