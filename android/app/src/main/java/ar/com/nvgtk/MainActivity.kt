@@ -64,6 +64,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavOptionsBuilder
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -90,6 +93,29 @@ enum class WindowSizeClass {
 /** T2: readable content width cap on expanded windows; no cap elsewhere. */
 internal val WindowSizeClass.contentMaxWidth: Dp
     get() = if (this == WindowSizeClass.Expanded) 720.dp else Dp.Unspecified
+
+/** T7: editor route for a note id; distinct ids push distinct back-stack
+ * entries, so back walks lista→A→B→A→lista instead of flattening. */
+internal fun editorRoute(noteId: String): String = "editor/$noteId"
+
+/** T7: trimmed link target, or null when blank (nothing to follow). */
+internal fun cleanWikiTarget(target: String): String? =
+    target.trim().takeIf { it.isNotEmpty() }
+
+/** T7-fix: THE options object every `navigate()` to an editor route uses
+ * (passed as `::applyEditorNavOptions`, so the regression test locks the
+ * real call's options, not a copy). One entry per note: `launchSingleTop`
+ * would reuse the top entry and flatten A→B; any `popUpTo` would drop A;
+ * both would turn back from B into back-to-lista. */
+internal fun applyEditorNavOptions(options: NavOptionsBuilder) {
+    options.launchSingleTop = false
+    options.restoreState = false
+}
+
+/** T7-fix: follow-link routing decision used verbatim by `followWikiLink`.
+ * Returns the route to push, or null for a self-link (stay in place). */
+internal fun editorFollowRoute(currentId: String?, targetId: String): String? =
+    if (targetId == currentId) null else editorRoute(targetId)
 
 class MainActivity : ComponentActivity() {
 
@@ -152,8 +178,16 @@ private fun NvApp(
     val storage = storage
     var notes by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
     var trash by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
-    var editorNote by remember { mutableStateOf<NoteSnapshot?>(null) }
+    // T7: per-note snapshots keyed by id, so each `editor/{noteId}`
+    // back-stack entry resolves its own note (back returns to the previous
+    // note instead of a shared value overwritten by the last navigation).
+    var editorSnapshots by remember { mutableStateOf<Map<String, NoteSnapshot>>(emptyMap()) }
     var editorAutoFocus by remember { mutableStateOf(false) }
+    // T7-fix: true once storage data has loaded. The editor entry below
+    // self-pops only when this is true AND its id is still unknown; before
+    // the first load (e.g. activity recreation restores the NavController
+    // stack while notes reload) entries must wait, not pop.
+    var notesLoaded by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
     var results by remember { mutableStateOf<List<NoteSnapshot>?>(null) }
@@ -168,7 +202,14 @@ private fun NvApp(
             }
         }.onSuccess { (freshNotes, freshTrash, freshResults) ->
             notes = freshNotes; trash = freshTrash; results = freshResults; error = null
-        }.onFailure { error = it.message }
+            notesLoaded = true
+        }.onFailure {
+            error = it.message
+            // A failed load will not resolve entries later, so let unknown
+            // ids fall through to the list (which shows the error) instead
+            // of waiting on a blank frame forever.
+            notesLoaded = true
+        }
     }
 
     fun ioOp(block: suspend () -> Unit) {
@@ -188,6 +229,43 @@ private fun NvApp(
     }
 
     val navController = rememberNavController()
+
+    // Wiki-link navigation (parity slice 3, desktop flow): open the note
+    // whose display title matches `target`; when none matches, create a note
+    // with the target as content (like desktop Enter-on-search) and open it.
+    // T7: pushes one back-stack entry per note (no single-top flattening), so
+    // system back returns to the previous note; a self-link stays in place.
+    fun followWikiLink(target: String) {
+        val clean = cleanWikiTarget(target) ?: return
+        scope.launch {
+            val resolved = withContext(Dispatchers.IO) {
+                runCatching {
+                    val existing = storage.wikiResolve(clean)
+                    if (existing != null) {
+                        existing
+                    } else {
+                        // Desktop-parity timestamp stem (yyyyMMdd-HHmm); the
+                        // core disambiguates same-minute collisions.
+                        val stamp = LocalDateTime.now()
+                            .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))
+                        val created = storage.createNote(stamp)
+                        storage.saveNote(created.id, clean)
+                    }
+                }
+            }
+            resolved.onSuccess { snap ->
+                editorSnapshots = editorSnapshots + (snap.id to snap)
+                editorAutoFocus = false
+                val currentId = navController.currentBackStackEntry
+                    ?.arguments?.getString("noteId")
+                val route = editorFollowRoute(currentId, snap.id)
+                if (route != null) {
+                    navController.navigate(route, ::applyEditorNavOptions)
+                }
+                refresh()
+            }.onFailure { error = it.message }
+        }
+    }
     NavHost(
         navController = navController,
         startDestination = "list",
@@ -212,9 +290,11 @@ private fun NvApp(
                 error = error,
                 windowSizeClass = windowSizeClass,
                 onOpen = { id ->
-                    editorNote = notes.firstOrNull { it.id == id }
-                    editorAutoFocus = false
-                    navController.navigate("editor")
+                    (results ?: notes).firstOrNull { it.id == id }?.let { found ->
+                        editorSnapshots = editorSnapshots + (found.id to found)
+                        editorAutoFocus = false
+                        navController.navigate(editorRoute(found.id), ::applyEditorNavOptions)
+                    }
                 },
                 onQueryChange = { query = it },
                 onTrash = { navController.navigate("trash") },
@@ -235,23 +315,43 @@ private fun NvApp(
                             }
                         }
                         created.onSuccess { note ->
-                            editorNote = note      // editor reads the note BY VALUE after creation
+                            editorSnapshots = editorSnapshots + (note.id to note)
                             editorAutoFocus = true // auto-open the keyboard only on the brand-new note
-                            navController.navigate("editor")
+                            navController.navigate(editorRoute(note.id), ::applyEditorNavOptions)
                             refresh()
                         }.onFailure { error = it.message }
                     }
                 }
             )
         }
-        composable("editor") {
+        composable(
+            route = "editor/{noteId}",
+            arguments = listOf(navArgument("noteId") { type = NavType.StringType })
+        ) { backStackEntry ->
             // Refresh the list whenever the editor leaves composition, so a
             // SYSTEM back gesture (which bypasses onDone) still shows fresh data.
             DisposableEffect(Unit) {
                 onDispose { refresh() }
             }
-            val note = editorNote
-            if (note == null) return@composable
+            val noteId = backStackEntry.arguments?.getString("noteId")
+            // Each stack entry resolves its own note: the cached snapshot
+            // first (covers just-created notes before refresh lands), then
+            // the fresh list.
+            val note = editorSnapshots[noteId]
+                ?: notes.firstOrNull { it.id == noteId }
+                ?: results?.firstOrNull { it.id == noteId }
+            if (note == null) {
+                // T7-fix: pop ONLY once storage data has loaded and the id is
+                // still unknown (e.g. a deleted note). While loading — notably
+                // after activity recreation, when rememberNavController
+                // restores entries but snapshots/notes are not back yet — the
+                // entry waits instead of popping itself: popping here collapses
+                // valid entries to lista and back can never return to them.
+                if (notesLoaded) {
+                    LaunchedEffect(Unit) { navController.popBackStack() }
+                }
+                return@composable
+            }
             NoteEditorScreen(
                 note = note,
                 storage = storage,
@@ -262,9 +362,13 @@ private fun NvApp(
                     navController.popBackStack()
                 },
                 onRenamed = { renamed ->
-                    editorNote = renamed
+                    // A rename changes the file/id: keep both the pre-rename
+                    // route id and the new id pointing at the snapshot.
+                    editorSnapshots = editorSnapshots +
+                        (note.id to renamed) + (renamed.id to renamed)
                     refresh()
-                }
+                },
+                onFollowLink = { target -> followWikiLink(target) }
             )
         }
         composable("trash") {

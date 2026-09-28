@@ -22,6 +22,7 @@ use crate::config::Config;
 use crate::note::Note;
 use crate::search::search_notes;
 use crate::storage::StorageManager;
+use crate::wiki::{self, WikiSourceNote};
 use chrono::{DateTime, Local};
 use std::fs;
 use std::path::PathBuf;
@@ -37,6 +38,79 @@ pub struct NoteSnapshot {
     pub tags: Vec<String>,
     pub modified_ms: i64,
     pub created_ms: i64,
+}
+
+/// FFI-safe view of a closed `[[target]]` hit: trimmed target plus byte
+/// offsets over the source text (parity slice 3; same semantics as the old
+/// desktop extractor, now in `crate::wiki`).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct WikiLink {
+    pub target: String,
+    pub start: u64,
+    pub end: u64,
+}
+
+/// FFI-safe autocomplete candidate: note identity plus what the UI shows
+/// (display title = first content line, raw tag list, 4-line preview).
+/// Parity slice 3; ranked by `crate::wiki::suggest_wiki_candidates`.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct WikiCandidate {
+    pub id: String,
+    pub display_title: String,
+    pub tags: Vec<String>,
+    pub preview: String,
+}
+
+fn wiki_link_of(hit: &crate::wiki::WikiLinkHit) -> WikiLink {
+    WikiLink {
+        target: hit.target.clone(),
+        start: hit.start as u64,
+        end: hit.end as u64,
+    }
+}
+
+fn candidate_of(candidate: &crate::wiki::WikiCandidate) -> WikiCandidate {
+    WikiCandidate {
+        id: candidate.id.clone(),
+        display_title: candidate.display_title.clone(),
+        tags: candidate.tags.clone(),
+        preview: candidate.preview.clone(),
+    }
+}
+
+/// Minimal read-only view of every note for wiki ranking, cloned under the
+/// storage lock so the fuzzy pass runs without blocking concurrent saves
+/// (same pattern as `search_notes` above).
+fn wiki_sources(inner: &StorageManager) -> Vec<WikiSourceNote> {
+    inner
+        .notes
+        .iter()
+        .map(|note| WikiSourceNote {
+            id: note.id.clone(),
+            content: note.content.clone(),
+            tags: note.tags.clone(),
+        })
+        .collect()
+}
+
+/// Every closed `[[target]]` in `text`, in document order.
+#[uniffi::export]
+pub fn extract_wiki_links(text: String) -> Vec<WikiLink> {
+    wiki::extract_wiki_links(&text).iter().map(wiki_link_of).collect()
+}
+
+/// Pending `[[query` on the current line up to the cursor (`None` when
+/// there is none or it is already closed). Drives the autocomplete panel.
+#[uniffi::export]
+pub fn open_wiki_query(line_before_cursor: String) -> Option<String> {
+    wiki::open_wiki_query(&line_before_cursor)
+}
+
+/// Closed link under a cursor given in chars (`None` when there is none or
+/// the cursor is out of range). Drives the follow-link affordance.
+#[uniffi::export]
+pub fn link_at_cursor(text: String, cursor_chars: u64) -> Option<WikiLink> {
+    wiki::link_at_cursor(&text, cursor_chars as usize).map(|hit| wiki_link_of(&hit))
 }
 
 /// Failures a Kotlin caller can observe. I/O details are flattened to strings
@@ -182,6 +256,35 @@ impl NvStorage {
             .map_err(NvError::from)?
             .map(|note| snapshot_of(&note))
             .ok_or(NvError::NotFound(id))
+    }
+
+    /// Ranked wiki autocomplete for `query` (fuzzy on display titles,
+    /// at most 8, same order as desktop). Empty queries list notes
+    /// alphabetically.
+    pub fn wiki_suggest(&self, query: String) -> Vec<WikiCandidate> {
+        let sources = {
+            let inner = self.lock();
+            wiki_sources(&inner)
+        };
+        wiki::suggest_wiki_candidates(&query, &sources)
+            .iter()
+            .map(candidate_of)
+            .collect()
+    }
+
+    /// Resolve a `[[target]]` to the note whose display title equals the
+    /// trimmed target (case-insensitive); `None` means the caller creates a
+    /// note with the target as content, mirroring the desktop flow.
+    pub fn wiki_resolve(&self, target: String) -> Option<NoteSnapshot> {
+        let id = {
+            let inner = self.lock();
+            let sources = wiki_sources(&inner);
+            let id = wiki::resolve_wiki_target(&target, &sources)?;
+            // Re-check under the same lock so the snapshot matches the
+            // note that resolved (no TOCTOU between resolve and read).
+            inner.get_note(&id).map(snapshot_of)
+        };
+        id
     }
 
     /// Trashed notes, newest-modified first (contract rule 9).
@@ -393,6 +496,44 @@ mod tests {
 
         fs::remove_dir_all(&dir).ok();
         fs::remove_dir_all(&dir2).ok();
+    }
+
+    #[test]
+    fn wiki_surface_roundtrip_through_ffi_object() {
+        let dir = temp_dir("wiki");
+        fs::write(dir.join("alpha.md"), "Proyecto Alfa\nver [[beta]]").unwrap();
+        fs::write(dir.join("beta.md"), "beta\ncuerpo #t").unwrap();
+        let storage = NvStorage::open(dir.to_string_lossy().into()).unwrap();
+
+        // Free functions: extraction, trigger rule, cursor lookup.
+        let links = extract_wiki_links("ver [[beta]] y [[ sin cerrar".to_string());
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].target, "beta");
+        assert_eq!(open_wiki_query("nota [[proy".to_string()).as_deref(), Some("proy"));
+        assert_eq!(open_wiki_query("ver [[beta]]".to_string()), None);
+        let at = link_at_cursor("ver [[beta]]".to_string(), 6).unwrap();
+        assert_eq!(at.target, "beta");
+        assert!(link_at_cursor("ver [[beta]]".to_string(), 0).is_none());
+
+        // Suggest: fuzzy on display titles, tags travel as a plain list.
+        let got = storage.wiki_suggest("proy".to_string());
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, "alpha");
+        assert_eq!(got[0].display_title, "Proyecto Alfa");
+        let got = storage.wiki_suggest("BETA".to_string());
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].id, "beta");
+        assert_eq!(got[0].tags, vec!["t".to_string()]);
+        assert!(got[0].preview.contains("cuerpo"));
+
+        // Resolve: exact display-title match; blank/unknown miss.
+        assert_eq!(
+            storage.wiki_resolve("proyecto alfa".to_string()).map(|n| n.id),
+            Some("alpha".to_string())
+        );
+        assert!(storage.wiki_resolve("nadie".to_string()).is_none());
+        assert!(storage.wiki_resolve("   ".to_string()).is_none());
+        fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

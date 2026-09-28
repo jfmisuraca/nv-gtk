@@ -1,4 +1,7 @@
-use regex::Regex;
+//! Desktop view of wiki-links. The logic lives in `nv-core` (`nv_core::wiki`)
+//! so Android runs the same code through FFI; this module only adapts the
+//! core hits to the desktop `WikiLink` (offsets as `usize` for GTK indexing).
+use nv_core::wiki;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct WikiLink {
@@ -8,19 +11,12 @@ pub struct WikiLink {
 }
 
 pub fn extract_wiki_links(text: &str) -> Vec<WikiLink> {
-    let re = Regex::new(r"\[\[([^\]]+)\]\]").unwrap();
-    let mut links = Vec::new();
-
-    for cap in re.captures_iter(text) {
-        if let Some(m) = cap.get(0) {
-            let target = cap[1].trim().to_string();
-            links.push(WikiLink {
-                target,
-                start: m.start(),
-                end: m.end(),
-            });
-        }
-    }
-
-    links
+    wiki::extract_wiki_links(text)
+        .into_iter()
+        .map(|hit| WikiLink {
+            target: hit.target,
+            start: hit.start,
+            end: hit.end,
+        })
+        .collect()
 }

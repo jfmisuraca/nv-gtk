@@ -31,6 +31,9 @@
     <string name="editor_field_label">Contenido de la nota</string>
     <string name="title_field_label">Título de la nota</string>
     <string name="note_empty_title">(nota vacía)</string>
+    <string name="wiki_no_matches">Sin coincidencias</string>
+    <string name="wiki_open_link">Abrir «%1$s»</string>
+    <string name="wiki_suggestions_label">Sugerencias de enlaces</string>
 
     <!-- Trash screen -->
     <string name="trash_title">Papelera</string>

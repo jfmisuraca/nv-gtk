@@ -12,6 +12,7 @@ use gtk4::{
 use crate::app_state::AppState;
 use crate::wiki_link::extract_wiki_links;
 use nv_core::util::timestamp_title;
+use nv_core::wiki::{WikiSourceNote, suggest_wiki_candidates};
 
 /// Estado del panel de autocompletado de wiki-links
 #[derive(Clone, Default)]
@@ -22,42 +23,8 @@ struct AutocompleteState {
     query: String, // lo que se escribió después de "[[", para poder crear una nota con eso
 }
 
-/// Coincidencia difusa tipo "subsequence": todos los caracteres de `query` deben
-/// aparecer en `target` en el mismo orden, aunque no estén seguidos.
-/// Devuelve `None` si no matchea, o `Some(score)` si matchea (menor score = mejor).
-fn fuzzy_score(query: &str, target: &str) -> Option<i32> {
-    if query.is_empty() {
-        return Some(0);
-    }
-
-    let query_lower = query.to_lowercase();
-    let target_lower = target.to_lowercase();
-
-    let mut score: i32 = 0;
-    let mut last_match: Option<usize> = None;
-    let mut q_chars = query_lower.chars().peekable();
-
-    for (ti, tc) in target_lower.chars().enumerate() {
-        if let Some(&qc) = q_chars.peek() {
-            if tc == qc {
-                match last_match {
-                    Some(last) => score += (ti - last - 1) as i32, // penaliza huecos entre matches
-                    None => score += ti as i32, // penaliza empezar lejos del principio
-                }
-                last_match = Some(ti);
-                q_chars.next();
-            }
-        } else {
-            break;
-        }
-    }
-
-    if q_chars.peek().is_some() {
-        None // no todos los caracteres de la query aparecieron
-    } else {
-        Some(score)
-    }
-}
+/// Ranking difuso, título visible y preview viven en `nv_core::wiki`
+/// (misma implementación que Android consume por FFI).
 
 /// Encapsula todo el sistema de wiki-links: resaltado visual de `[[links]]` cerrados
 /// y un panel flotante de autocompletado difuso mientras se escribe `[[query`.
@@ -115,8 +82,8 @@ impl WikiAutocomplete {
         // --- Panel de autocompletado de wiki-links ---
         let autocomplete_state: Rc<RefCell<AutocompleteState>> =
             Rc::new(RefCell::new(AutocompleteState::default()));
-        let autocomplete_matches: Rc<RefCell<Vec<(String, String, String)>>> =
-            Rc::new(RefCell::new(Vec::new())); // (id, título, tags formateados)
+        let autocomplete_matches: Rc<RefCell<Vec<(String, String, String, String)>>> =
+            Rc::new(RefCell::new(Vec::new())); // (id, título, tags formateados, preview)
 
         let autocomplete_list = ListBox::new();
         autocomplete_list.set_selection_mode(SelectionMode::Single);
@@ -184,24 +151,17 @@ impl WikiAutocomplete {
             }
         };
 
-        // Muestra en el panel lateral las primeras 4 líneas del contenido de la nota candidata
+        // Muestra en el panel lateral el preview que el core ya calculó
+        // para la candidata (primeras 4 líneas de su contenido).
         let update_autocomplete_preview = {
-            let state = Rc::clone(&state);
             let autocomplete_matches = Rc::clone(&autocomplete_matches);
             let autocomplete_preview = autocomplete_preview.clone();
 
             move |idx: usize| {
-                let note_id = {
+                let preview_text = {
                     let matches = autocomplete_matches.borrow();
-                    matches.get(idx).map(|(id, _, _)| id.clone())
+                    matches.get(idx).map(|(_, _, _, preview)| preview.clone())
                 };
-
-                let preview_text = note_id.and_then(|id| {
-                    let st = state.borrow();
-                    st.storage
-                        .get_note(&id)
-                        .map(|note| note.content.lines().take(4).collect::<Vec<_>>().join("\n"))
-                });
 
                 autocomplete_preview.set_text(preview_text.as_deref().unwrap_or(""));
             }
@@ -294,42 +254,36 @@ impl WikiAutocomplete {
                     text_before_cursor[..absolute_byte_offset].chars().count() as i32;
 
                 // Calcular matches difusos contra la primera línea del contenido de cada nota
-                // (el título es solo un timestamp, no sirve para buscar ni mostrar)
-                let mut matches: Vec<(String, String, String, String, i32)> = {
+                // (el título es solo un timestamp, no sirve para buscar ni mostrar).
+                // El ranking vive en el core para que Android reuse la misma
+                // implementación por FFI; acá solo se formatea para la lista.
+                let matches: Vec<(String, String, String, String)> = {
                     let st = state.borrow();
-                    st.storage
+                    let sources: Vec<WikiSourceNote> = st
+                        .storage
                         .notes
                         .iter()
-                        .filter_map(|note| {
-                            let display_title = note
-                                .content
-                                .lines()
-                                .map(|l| l.trim())
-                                .find(|l| !l.is_empty())
-                                .unwrap_or("(nota vacía)")
-                                .to_string();
-
-                            fuzzy_score(&query, &display_title).map(|score| {
-                                let tags = if note.tags.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(
-                                        "[{}]",
-                                        note.tags
-                                            .iter()
-                                            .map(|t| t.as_str())
-                                            .collect::<Vec<_>>()
-                                            .join(" ")
-                                    )
-                                };
-                                (
-                                    note.id.clone(),
-                                    note.title.clone(),
-                                    display_title,
-                                    tags,
-                                    score,
-                                )
-                            })
+                        .map(|note| WikiSourceNote {
+                            id: note.id.clone(),
+                            content: note.content.clone(),
+                            tags: note.tags.clone(),
+                        })
+                        .collect();
+                    drop(st);
+                    suggest_wiki_candidates(&query, &sources)
+                        .into_iter()
+                        .map(|candidate| {
+                            let tags = if candidate.tags.is_empty() {
+                                String::new()
+                            } else {
+                                format!("[{}]", candidate.tags.join(" "))
+                            };
+                            (
+                                candidate.id,
+                                candidate.display_title,
+                                tags,
+                                candidate.preview,
+                            )
                         })
                         .collect()
                 };
@@ -377,15 +331,15 @@ impl WikiAutocomplete {
                     return;
                 }
 
-                matches.sort_by(|a, b| a.4.cmp(&b.4).then_with(|| a.2.cmp(&b.2)));
-                matches.truncate(8);
+                // El core ya devuelve ordenado por (score, título) y truncado
+                // a 8: acá solo se puebla la lista visual.
 
                 // Poblar la lista visual
                 while let Some(child) = autocomplete_list.first_child() {
                     autocomplete_list.remove(&child);
                 }
 
-                for (_id, _title, display_title, tags, _score) in &matches {
+                for (_id, display_title, tags, _preview) in &matches {
                     let row = ListBoxRow::new();
                     let row_box = GtkBox::new(Orientation::Horizontal, 8);
                     row_box.set_margin_start(10);
@@ -408,10 +362,7 @@ impl WikiAutocomplete {
                     autocomplete_list.append(&row);
                 }
 
-                *autocomplete_matches.borrow_mut() = matches
-                    .into_iter()
-                    .map(|(id, _title, display, tags, _)| (id, display, tags))
-                    .collect();
+                *autocomplete_matches.borrow_mut() = matches;
 
                 select_autocomplete_row(0);
                 update_autocomplete_preview(0);
@@ -448,7 +399,7 @@ impl WikiAutocomplete {
             move |idx: usize| {
                 let title = {
                     let matches = autocomplete_matches.borrow();
-                    matches.get(idx).map(|(_, t, _)| t.clone())
+                    matches.get(idx).map(|(_, t, _, _)| t.clone())
                 };
 
                 let title = match title {
