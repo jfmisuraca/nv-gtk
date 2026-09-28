@@ -64,6 +64,8 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -90,6 +92,14 @@ enum class WindowSizeClass {
 /** T2: readable content width cap on expanded windows; no cap elsewhere. */
 internal val WindowSizeClass.contentMaxWidth: Dp
     get() = if (this == WindowSizeClass.Expanded) 720.dp else Dp.Unspecified
+
+/** T7: editor route for a note id; distinct ids push distinct back-stack
+ * entries, so back walks lista→A→B→A→lista instead of flattening. */
+internal fun editorRoute(noteId: String): String = "editor/$noteId"
+
+/** T7: trimmed link target, or null when blank (nothing to follow). */
+internal fun cleanWikiTarget(target: String): String? =
+    target.trim().takeIf { it.isNotEmpty() }
 
 class MainActivity : ComponentActivity() {
 
@@ -152,7 +162,10 @@ private fun NvApp(
     val storage = storage
     var notes by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
     var trash by remember { mutableStateOf<List<NoteSnapshot>>(emptyList()) }
-    var editorNote by remember { mutableStateOf<NoteSnapshot?>(null) }
+    // T7: per-note snapshots keyed by id, so each `editor/{noteId}`
+    // back-stack entry resolves its own note (back returns to the previous
+    // note instead of a shared value overwritten by the last navigation).
+    var editorSnapshots by remember { mutableStateOf<Map<String, NoteSnapshot>>(emptyMap()) }
     var editorAutoFocus by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf("") }
@@ -192,10 +205,10 @@ private fun NvApp(
     // Wiki-link navigation (parity slice 3, desktop flow): open the note
     // whose display title matches `target`; when none matches, create a note
     // with the target as content (like desktop Enter-on-search) and open it.
-    // Stays on the editor route (single-top) when already editing.
+    // T7: pushes one back-stack entry per note (no single-top flattening), so
+    // system back returns to the previous note; a self-link stays in place.
     fun followWikiLink(target: String) {
-        val clean = target.trim()
-        if (clean.isEmpty()) return
+        val clean = cleanWikiTarget(target) ?: return
         scope.launch {
             val resolved = withContext(Dispatchers.IO) {
                 runCatching {
@@ -213,10 +226,12 @@ private fun NvApp(
                 }
             }
             resolved.onSuccess { snap ->
-                editorNote = snap
+                editorSnapshots = editorSnapshots + (snap.id to snap)
                 editorAutoFocus = false
-                navController.navigate("editor") {
-                    launchSingleTop = true
+                val currentId = navController.currentBackStackEntry
+                    ?.arguments?.getString("noteId")
+                if (snap.id != currentId) {
+                    navController.navigate(editorRoute(snap.id))
                 }
                 refresh()
             }.onFailure { error = it.message }
@@ -246,9 +261,11 @@ private fun NvApp(
                 error = error,
                 windowSizeClass = windowSizeClass,
                 onOpen = { id ->
-                    editorNote = notes.firstOrNull { it.id == id }
-                    editorAutoFocus = false
-                    navController.navigate("editor")
+                    (results ?: notes).firstOrNull { it.id == id }?.let { found ->
+                        editorSnapshots = editorSnapshots + (found.id to found)
+                        editorAutoFocus = false
+                        navController.navigate(editorRoute(found.id))
+                    }
                 },
                 onQueryChange = { query = it },
                 onTrash = { navController.navigate("trash") },
@@ -269,23 +286,35 @@ private fun NvApp(
                             }
                         }
                         created.onSuccess { note ->
-                            editorNote = note      // editor reads the note BY VALUE after creation
+                            editorSnapshots = editorSnapshots + (note.id to note)
                             editorAutoFocus = true // auto-open the keyboard only on the brand-new note
-                            navController.navigate("editor")
+                            navController.navigate(editorRoute(note.id))
                             refresh()
                         }.onFailure { error = it.message }
                     }
                 }
             )
         }
-        composable("editor") {
+        composable(
+            route = "editor/{noteId}",
+            arguments = listOf(navArgument("noteId") { type = NavType.StringType })
+        ) { backStackEntry ->
             // Refresh the list whenever the editor leaves composition, so a
             // SYSTEM back gesture (which bypasses onDone) still shows fresh data.
             DisposableEffect(Unit) {
                 onDispose { refresh() }
             }
-            val note = editorNote
-            if (note == null) return@composable
+            val noteId = backStackEntry.arguments?.getString("noteId")
+            // Each stack entry resolves its own note: the cached snapshot
+            // first (covers just-created notes before refresh lands), then
+            // the fresh list.
+            val note = editorSnapshots[noteId]
+                ?: notes.firstOrNull { it.id == noteId }
+                ?: results?.firstOrNull { it.id == noteId }
+            if (note == null) {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+                return@composable
+            }
             NoteEditorScreen(
                 note = note,
                 storage = storage,
@@ -296,7 +325,10 @@ private fun NvApp(
                     navController.popBackStack()
                 },
                 onRenamed = { renamed ->
-                    editorNote = renamed
+                    // A rename changes the file/id: keep both the pre-rename
+                    // route id and the new id pointing at the snapshot.
+                    editorSnapshots = editorSnapshots +
+                        (note.id to renamed) + (renamed.id to renamed)
                     refresh()
                 },
                 onFollowLink = { target -> followWikiLink(target) }
