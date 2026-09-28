@@ -266,6 +266,59 @@ private fun NvApp(
             }.onFailure { error = it.message }
         }
     }
+
+    // Parity slice 1 (T1): shared FAB / Enter-in-search creation, routed
+    // through the slice-3 per-note `editor/{noteId}` entries (explicit nav
+    // options, snapshot map). The title is the timestamp stem (desktop
+    // parity); `initialContent` is "" from the FAB or the query when Enter
+    // had no match (desktop stores the query as the new note's content).
+    fun createAndOpen(initialContent: String) {
+        // createNote is IO; navigation and Compose state must run
+        // on the main thread (NavController touches the lifecycle).
+        scope.launch {
+            val created = withContext(Dispatchers.IO) {
+                runCatching {
+                    // Desktop-parity timestamp stem (yyyyMMdd-HHmm); the
+                    // core disambiguates same-minute collisions.
+                    // java.time needs API 26+ and minSdk is already 26.
+                    val stamp = LocalDateTime.now()
+                        .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))
+                    val note = storage.createNote(stamp)
+                    if (initialContent.isNotEmpty()) storage.saveNote(note.id, initialContent)
+                    else note
+                }
+            }
+            created.onSuccess { note ->
+                editorSnapshots = editorSnapshots + (note.id to note)
+                editorAutoFocus = true // auto-open the keyboard only on the brand-new note
+                navController.navigate(editorRoute(note.id), ::applyEditorNavOptions)
+                refresh()
+            }.onFailure { error = it.message }
+        }
+    }
+
+    // Parity slice 1 (T1): Enter with a match opens the best hit; with no
+    // match it creates a note with the query as content. The search resolves
+    // here (fresh, via storage) instead of reusing `results`, which arrives
+    // with a 300ms debounce and may be stale when Enter is pressed.
+    fun submitSearch() {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) return
+        scope.launch {
+            val matches = withContext(Dispatchers.IO) {
+                runCatching { storage.searchNotes(trimmed) }.getOrDefault(emptyList())
+            }
+            val best = matches.firstOrNull()
+            if (best != null) {
+                val found = notes.firstOrNull { it.id == best.id } ?: best
+                editorSnapshots = editorSnapshots + (found.id to found)
+                editorAutoFocus = false
+                navController.navigate(editorRoute(found.id), ::applyEditorNavOptions)
+            } else {
+                createAndOpen(trimmed)
+            }
+        }
+    }
     NavHost(
         navController = navController,
         startDestination = "list",
@@ -299,29 +352,8 @@ private fun NvApp(
                 onQueryChange = { query = it },
                 onTrash = { navController.navigate("trash") },
                 onSettings = { navController.navigate("settings") },
-                onCreate = {
-                    // createNote is IO; navigation and Compose state must run
-                    // on the main thread (NavController touches the lifecycle).
-                    scope.launch {
-                        val created = withContext(Dispatchers.IO) {
-                            runCatching {
-                                // Desktop-parity timestamp stem (AAAAMMDD-HHMM);
-                                // core disambiguates same-minute collisions
-                                // with seconds. java.time needs API 26+ and
-                                // minSdk is already 26.
-                                val stamp = LocalDateTime.now()
-                                    .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmm"))
-                                storage.createNote(stamp)
-                            }
-                        }
-                        created.onSuccess { note ->
-                            editorSnapshots = editorSnapshots + (note.id to note)
-                            editorAutoFocus = true // auto-open the keyboard only on the brand-new note
-                            navController.navigate(editorRoute(note.id), ::applyEditorNavOptions)
-                            refresh()
-                        }.onFailure { error = it.message }
-                    }
-                }
+                onCreate = { createAndOpen("") },
+                onSearchSubmit = { submitSearch() }
             )
         }
         composable(

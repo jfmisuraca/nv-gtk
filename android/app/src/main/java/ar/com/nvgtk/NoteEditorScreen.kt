@@ -406,10 +406,23 @@ fun NoteEditorScreen(
                 OutlinedTextField(
                     state = textFieldState,
                     modifier = Modifier
-                        .fillMaxSize()
+                        .fillMaxWidth()
+                        .weight(1f)
                         .focusRequester(focusRequester)
                         .semantics { contentDescription = editorFieldLabel },
                     placeholder = { Text(stringResource(R.string.editor_placeholder)) }
+                )
+                // Parity slice 1 (T4): contador palabras/caracteres, paridad
+                // con el footer de desktop (`window.rs`: split_whitespace +
+                // chars count, "%d palabras | %d caracteres"). Lee el texto
+                // vivo así que se actualiza en cada recomposición.
+                val currentText = textFieldState.text.toString()
+                val words = currentText.split(Regex("\\s+")).count { it.isNotEmpty() }
+                val chars = currentText.codePointCount(0, currentText.length)
+                Text(
+                    "$words palabras | $chars caracteres",
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(top = 8.dp)
                 )
             }
         }
