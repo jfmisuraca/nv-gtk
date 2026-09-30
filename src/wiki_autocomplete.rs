@@ -10,6 +10,7 @@ use gtk4::{
 };
 
 use crate::app_state::AppState;
+use crate::palettes::{ThemeId, Variant, palette};
 use crate::wiki_link::extract_wiki_links;
 use nv_core::util::timestamp_title;
 use nv_core::wiki::{WikiSourceNote, suggest_wiki_candidates};
@@ -26,6 +27,16 @@ struct AutocompleteState {
 /// Ranking difuso, título visible y preview viven en `nv_core::wiki`
 /// (misma implementación que Android consume por FFI).
 
+/// Devuelve el color de acento para el resaltado de `[[wiki-links]]`: el slot
+/// `mauve` de la paleta activa para (`theme`, `dark`).
+///
+/// Pura y sin GTK, testeable sin display. `Wallpaper` cae al fallback de
+/// Catppuccin porque [`palette`] ya lo resuelve así (v1, sin pywal).
+pub fn wiki_link_accent(theme: ThemeId, dark: bool) -> String {
+    let variant = if dark { Variant::Dark } else { Variant::Light };
+    palette(theme, variant).mauve.into_owned()
+}
+
 /// Encapsula todo el sistema de wiki-links: resaltado visual de `[[links]]` cerrados
 /// y un panel flotante de autocompletado difuso mientras se escribe `[[query`.
 ///
@@ -37,6 +48,7 @@ pub struct WikiAutocomplete {
     refresh_fn: Rc<dyn Fn()>,
     update_fn: Rc<dyn Fn()>,
     close_fn: Rc<dyn Fn()>,
+    set_accent_fn: Rc<dyn Fn(&str)>,
 }
 
 impl WikiAutocomplete {
@@ -57,25 +69,35 @@ impl WikiAutocomplete {
         (self.close_fn)();
     }
 
+    /// Actualiza el color del tag `wiki-link` al acento dado y re-resalta el
+    /// buffer actual. Llamar al cambiar de tema para que `[[...]]` siga al
+    /// mauve de la paleta nueva; el texto guardado no se toca.
+    pub fn set_accent(&self, accent: &str) {
+        (self.set_accent_fn)(accent);
+    }
+
     /// Conecta el sistema de wiki-links a `text_view`, superponiendo su panel de
     /// autocompletado sobre `editor_overlay`.
     ///
-    /// `on_navigate` se invoca cuando el usuario hace `Ctrl+Enter` con el cursor
-    /// sobre un `[[link]]` ya cerrado; el caller decide qué hacer con el texto del
-    /// link (por ejemplo, volcarlo en la barra de búsqueda).
+    /// `accent` es el color inicial del tag `wiki-link` (ver
+    /// [`wiki_link_accent`]); `on_navigate` se invoca cuando el usuario hace
+    /// `Ctrl+Enter` con el cursor sobre un `[[link]]` ya cerrado; el caller
+    /// decide qué hacer con el texto del link (por ejemplo, volcarlo en la
+    /// barra de búsqueda).
     pub fn setup(
         state: Rc<RefCell<AppState>>,
         text_view: TextView,
         editor_overlay: Overlay,
+        accent: &str,
         on_navigate: impl Fn(&str) + 'static,
     ) -> Self {
         let on_navigate = Rc::new(on_navigate);
 
-        // Tag visual para los wiki-links (subrayado + color)
+        // Tag visual para los wiki-links (subrayado + color del acento del tema)
         let wiki_link_tag = TextTag::builder()
             .name("wiki-link")
             .underline(gtk4::pango::Underline::Single)
-            .foreground("#4a9eff")
+            .foreground(accent)
             .build();
         text_view.buffer().tag_table().add(&wiki_link_tag);
 
@@ -203,6 +225,18 @@ impl WikiAutocomplete {
                 }
 
                 state.borrow_mut().current_wiki_links = links;
+            })
+        };
+
+        // Cambia el color del tag y re-resalta: cambiar la propiedad del tag
+        // ya repinta los rangos aplicados, pero se llama a refresh para que
+        // cualquier link nuevo quede cubierto con el acento vigente.
+        let set_wiki_link_accent: Rc<dyn Fn(&str)> = {
+            let wiki_link_tag = wiki_link_tag.clone();
+            let refresh_wiki_links = Rc::clone(&refresh_wiki_links);
+            Rc::new(move |accent: &str| {
+                wiki_link_tag.set_foreground(Some(accent));
+                refresh_wiki_links();
             })
         };
 
@@ -560,6 +594,56 @@ impl WikiAutocomplete {
             refresh_fn: refresh_wiki_links,
             update_fn: update_autocomplete,
             close_fn: close_autocomplete,
+            set_accent_fn: set_wiki_link_accent,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALL_THEMES: [ThemeId; 4] = [
+        ThemeId::Catppuccin,
+        ThemeId::Dracula,
+        ThemeId::Flexoki,
+        ThemeId::Wallpaper,
+    ];
+
+    #[test]
+    fn accent_matches_the_mauve_slot_for_every_theme_and_variant() {
+        for theme in ALL_THEMES {
+            for dark in [false, true] {
+                let variant = if dark { Variant::Dark } else { Variant::Light };
+                assert_eq!(
+                    wiki_link_accent(theme, dark),
+                    palette(theme, variant).mauve.into_owned(),
+                    "{theme:?} dark={dark}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn accent_never_uses_the_legacy_hardcoded_blue() {
+        for theme in ALL_THEMES {
+            for dark in [false, true] {
+                assert_ne!(
+                    wiki_link_accent(theme, dark),
+                    "#4a9eff",
+                    "{theme:?} dark={dark} still uses the legacy blue",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn wallpaper_accent_falls_back_to_catppuccin() {
+        for dark in [false, true] {
+            assert_eq!(
+                wiki_link_accent(ThemeId::Wallpaper, dark),
+                wiki_link_accent(ThemeId::Catppuccin, dark),
+            );
         }
     }
 }
