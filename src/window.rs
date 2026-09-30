@@ -15,7 +15,7 @@ use libadwaita::{Application, ApplicationWindow};
 use crate::app_state::AppState;
 use crate::palettes::ThemeId;
 use crate::theme;
-use crate::wiki_autocomplete::WikiAutocomplete;
+use crate::wiki_autocomplete::{WikiAutocomplete, wiki_link_accent};
 use nv_core::config::Config;
 use nv_core::search::search_notes;
 use nv_core::storage::StorageManager;
@@ -295,6 +295,20 @@ const WINDOW_SHORTCUTS: &[WindowShortcut] = &[
     },
 ];
 
+/// Lee la preferencia claro/oscuro del OS desde los GTK settings del display.
+///
+/// `true` = oscuro. Sin display o si la lectura falla, cae a oscuro (el look
+/// Mocha es el arranque histórico); el CSS sigue al OS en vivo vía sus
+/// bloques `@media`, solo el tag del wiki-link necesita un color concreto al
+/// arrancar y en cada cambio de tema.
+/// El cambio de variante del OS en caliente no re-colorea el tag (follow-up).
+fn os_prefers_dark(display: Option<&gdk::Display>) -> bool {
+    display
+        .map(gtk4::Settings::for_display)
+        .map(|settings| settings.is_gtk_application_prefer_dark_theme())
+        .unwrap_or(true)
+}
+
 pub fn build_ui(app: &Application) -> UiHandles {
     let config = Config::load();
     // Aplica el tema guardado antes de construir la ventana para que cada
@@ -431,6 +445,10 @@ pub fn build_ui(app: &Application) -> UiHandles {
     theme_button.set_popover(Some(&theme_popover));
     status_box.append(&theme_button);
 
+    // El resaltado [[...]] vive en WikiAutocomplete, que se crea más abajo:
+    // este holder puentea el selector de tema con el setter de acento.
+    let wiki_holder: Rc<RefCell<Option<WikiAutocomplete>>> = Rc::new(RefCell::new(None));
+
     const THEME_ORDER: [ThemeId; 4] = [
         ThemeId::Catppuccin,
         ThemeId::Dracula,
@@ -449,12 +467,19 @@ pub fn build_ui(app: &Application) -> UiHandles {
         let theme_handle_c = theme_handle.clone();
         let state_c = state.clone();
         let theme_button_c = theme_button.clone();
+        let wiki_holder_c = wiki_holder.clone();
         item.connect_toggled(move |button| {
             if !button.is_active() {
                 return;
             }
             if let Some(ref handle) = theme_handle_c {
                 handle.apply(id);
+            }
+            // El CSS no toca el tag wiki-link: re-colorearlo al mauve de la
+            // paleta nueva y re-resaltar, con la variante claro/oscuro del OS.
+            let dark = os_prefers_dark(gdk::Display::default().as_ref());
+            if let Some(ref wiki) = *wiki_holder_c.borrow() {
+                wiki.set_accent(&wiki_link_accent(id, dark));
             }
             state_c.borrow_mut().config.theme = id.as_str().to_string();
             state_c.borrow().config.save();
@@ -860,11 +885,21 @@ pub fn build_ui(app: &Application) -> UiHandles {
         }
     };
 
-    // Sistema de wiki-links: resaltado + autocompletado difuso con panel flotante
-    let wiki = WikiAutocomplete::setup(Rc::clone(&state), text_view.clone(), editor_overlay, {
-        let search_wiki_target = search_wiki_target.clone();
-        move |target: &str| search_wiki_target(target)
-    });
+    // Sistema de wiki-links: resaltado + autocompletado difuso con panel flotante.
+    // El tag arranca con el mauve de la paleta inicial (variante según el OS).
+    let initial_dark = os_prefers_dark(gdk::Display::default().as_ref());
+    let initial_accent = wiki_link_accent(initial_theme, initial_dark);
+    let wiki = WikiAutocomplete::setup(
+        Rc::clone(&state),
+        text_view.clone(),
+        editor_overlay,
+        &initial_accent,
+        {
+            let search_wiki_target = search_wiki_target.clone();
+            move |target: &str| search_wiki_target(target)
+        },
+    );
+    *wiki_holder.borrow_mut() = Some(wiki.clone());
 
     // Flushes any pending debounced save immediately (used when switching notes or closing)
     let flush_pending_save = {

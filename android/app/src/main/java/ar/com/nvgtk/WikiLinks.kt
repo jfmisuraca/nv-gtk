@@ -54,3 +54,64 @@ fun insertWikiCompletion(
     return (text.substring(0, start) + completed + text.substring(safe)) to
         (start + completed.length)
 }
+
+/**
+ * Highlight range over the editor text in UTF-16 code units (Kotlin/Compose
+ * indices). Produced from the core `extractWikiLinks` byte offsets via
+ * [wikiHighlightRanges]; kept free of FFI types so JVM unit tests never load
+ * the native library.
+ */
+data class WikiHighlightRange(val start: Int, val end: Int)
+
+/**
+ * Convert a UTF-8 byte offset (core `extractWikiLinks` semantics) into a
+ * UTF-16 index over [text].
+ *
+ * The core counts bytes while Compose counts UTF-16 code units, so multibyte
+ * chars (e.g. `é`, `中`) and non-BMP chars (e.g. emoji, 4 bytes UTF-8 but 2
+ * UTF-16 units) shift the two coordinate spaces apart. Offsets are clamped:
+ * negative → 0, past-the-end → [text.length], and mid-char offsets snap back
+ * to the start of the enclosing char (core offsets always land on char
+ * boundaries; this only guards synthetic/stale input).
+ */
+fun byteOffsetToUtf16Index(text: String, byteOffset: Long): Int {
+    if (text.isEmpty() || byteOffset <= 0) return 0
+    var bytes = 0L
+    var i = 0
+    while (i < text.length) {
+        val codePoint = text.codePointAt(i)
+        val byteLen = when {
+            codePoint < 0x80 -> 1L
+            codePoint < 0x800 -> 2L
+            codePoint < 0x10000 -> 3L
+            else -> 4L
+        }
+        if (bytes + byteLen > byteOffset) break
+        bytes += byteLen
+        i += Character.charCount(codePoint)
+    }
+    return i
+}
+
+/**
+ * Map core-style UTF-8 [byteRanges] (`start`/`end` pairs in document order)
+ * to Compose-ready [WikiHighlightRange]s over [text].
+ *
+ * Invalid entries are dropped, never crash: empty/reversed ranges
+ * (`start >= end` after conversion) and ranges fully outside the text yield
+ * nothing; partially out-of-range ends clamp to the text bounds. An open
+ * trigger (`[[query` without `]]`) produces no byte ranges upstream, so it
+ * maps to an empty highlight list — the panel owns that state, not the
+ * transformation.
+ */
+fun wikiHighlightRanges(
+    text: String,
+    byteRanges: List<Pair<Long, Long>>
+): List<WikiHighlightRange> {
+    if (text.isEmpty() || byteRanges.isEmpty()) return emptyList()
+    return byteRanges.mapNotNull { (startBytes, endBytes) ->
+        val start = byteOffsetToUtf16Index(text, startBytes)
+        val end = byteOffsetToUtf16Index(text, endBytes)
+        if (start >= end) null else WikiHighlightRange(start, end)
+    }
+}
