@@ -29,7 +29,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -129,12 +128,12 @@ fun NoteEditorScreen(
     val openQuery = remember(fullText, cursorPos) {
         runCatching { openWikiQuery(lineBeforeCursor(fullText, cursorPos)) }.getOrNull()
     }
-    // Wiki highlight (feature wiki-highlight T2): closed `[[...]]` ranges
-    // render underlined/blue (desktop parity `#4A9EFF`). The FFI scan runs
-    // here in `remember(fullText)` — never inside `transformOutput` (layout
-    // thread) — and the transformation itself is style-only (`addStyle`, no
-    // insert/replace), so saved text stays raw `[[...]]`. An open `[[query`
-    // yields no ranges upstream, hence no highlight.
+    // Wiki highlight (feature wiki-highlight): closed `[[...]]` ranges render
+    // underlined in the theme accent (`colorScheme.primary`, contrasts on all
+    // palettes). The FFI scan runs here in `remember(fullText)` — never inside
+    // `transformOutput` (layout thread) — and the transformation itself is
+    // style-only (`addStyle`, no insert/replace), so saved text stays raw
+    // `[[...]]`. An open `[[query` yields no ranges upstream, hence no highlight.
     val highlightRanges = remember(fullText) {
         runCatching {
             wikiHighlightRanges(
@@ -143,12 +142,13 @@ fun NoteEditorScreen(
             )
         }.getOrDefault(emptyList())
     }
-    val wikiHighlightTransformation = remember(highlightRanges) {
+    val highlightColor = MaterialTheme.colorScheme.primary
+    val wikiHighlightTransformation = remember(highlightRanges, highlightColor) {
         OutputTransformation {
             for (range in highlightRanges) {
                 addStyle(
                     SpanStyle(
-                        color = Color(0xFF4A9EFF),
+                        color = highlightColor,
                         textDecoration = TextDecoration.Underline
                     ),
                     range.start,
