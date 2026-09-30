@@ -87,15 +87,15 @@ val DraculaLightColors: ColorScheme = lightColorScheme(
 )
 
 val FlexokiDarkColors: ColorScheme = darkColorScheme(
-    primary = Color(0xFF5E409D), // purple 600
+    primary = Color(0xFF8B7EC8), // purple 400 (400 on dark per Flexoki contrast guidance)
     onPrimary = Color(0xFF100F0F), // black (base)
     primaryContainer = Color(0xFF403E3C), // ramp step (surface1)
     onPrimaryContainer = Color(0xFFF2F0E5), // text
-    secondary = Color(0xFF24837B), // cyan 600
+    secondary = Color(0xFF3AA99F), // cyan 400 (400 on dark)
     onSecondary = Color(0xFF100F0F), // black (base)
     secondaryContainer = Color(0xFF343331), // ramp step (surface0)
     onSecondaryContainer = Color(0xFFF2F0E5), // text
-    tertiary = Color(0xFF5E409D), // purple 600
+    tertiary = Color(0xFF8B7EC8), // purple 400 (400 on dark)
     onTertiary = Color(0xFF100F0F), // black (base)
     tertiaryContainer = Color(0xFF403E3C), // ramp step (surface1)
     onTertiaryContainer = Color(0xFFF2F0E5), // text
@@ -107,25 +107,25 @@ val FlexokiDarkColors: ColorScheme = darkColorScheme(
     onSurfaceVariant = Color(0xFF878580), // ramp step (overlay1)
     outline = Color(0xFF575653), // ramp step (surface2)
     outlineVariant = Color(0xFF403E3C), // ramp step (surface1)
-    error = Color(0xFFAF3029), // red 600
+    error = Color(0xFFD14D41), // red 400 (400 on dark)
     onError = Color(0xFF100F0F), // black (base)
-    errorContainer = Color(0xFFA02F6F), // magenta 600 (soft-red alias)
-    onErrorContainer = Color(0xFFAF3029), // red 600
+    errorContainer = Color(0xFFCE5D97), // magenta 400 (soft-red alias)
+    onErrorContainer = Color(0xFFD14D41), // red 400
     inverseSurface = Color(0xFFF2F0E5), // text
     inverseOnSurface = Color(0xFF100F0F), // black (base)
-    surfaceTint = Color(0xFF5E409D), // purple 600
+    surfaceTint = Color(0xFF8B7EC8), // purple 400
 )
 
 val FlexokiLightColors: ColorScheme = lightColorScheme(
-    primary = Color(0xFF8B7EC8), // purple 400
+    primary = Color(0xFF5E409D), // purple 600 (600 on light per Flexoki contrast guidance)
     onPrimary = Color(0xFFFFFCF0), // paper (base)
     primaryContainer = Color(0xFFCECDC3), // ramp step (surface1)
     onPrimaryContainer = Color(0xFF100F0F), // text
-    secondary = Color(0xFF3AA99F), // cyan 400
+    secondary = Color(0xFF24837B), // cyan 600 (600 on light)
     onSecondary = Color(0xFFFFFCF0), // paper (base)
     secondaryContainer = Color(0xFFDAD8CE), // ramp step (surface0)
     onSecondaryContainer = Color(0xFF100F0F), // text
-    tertiary = Color(0xFF8B7EC8), // purple 400
+    tertiary = Color(0xFF5E409D), // purple 600 (600 on light)
     onTertiary = Color(0xFFFFFCF0), // paper (base)
     tertiaryContainer = Color(0xFFCECDC3), // ramp step (surface1)
     onTertiaryContainer = Color(0xFF100F0F), // text
@@ -137,13 +137,13 @@ val FlexokiLightColors: ColorScheme = lightColorScheme(
     onSurfaceVariant = Color(0xFF878580), // ramp step (overlay1)
     outline = Color(0xFFB7B5AC), // ramp step (surface2)
     outlineVariant = Color(0xFFCECDC3), // ramp step (surface1)
-    error = Color(0xFFD14D41), // red 400
+    error = Color(0xFFAF3029), // red 600 (600 on light)
     onError = Color(0xFFFFFCF0), // paper (base)
-    errorContainer = Color(0xFFCE5D97), // magenta 400 (soft-red alias)
-    onErrorContainer = Color(0xFFD14D41), // red 400
+    errorContainer = Color(0xFFA02F6F), // magenta 600 (soft-red alias)
+    onErrorContainer = Color(0xFFAF3029), // red 600
     inverseSurface = Color(0xFF100F0F), // text
     inverseOnSurface = Color(0xFFFFFCF0), // paper (base)
-    surfaceTint = Color(0xFF8B7EC8), // purple 400
+    surfaceTint = Color(0xFF5E409D), // purple 600
 )
 
 /**
