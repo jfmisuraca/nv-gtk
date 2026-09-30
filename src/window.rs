@@ -20,6 +20,15 @@ use nv_core::config::Config;
 use nv_core::search::search_notes;
 use nv_core::storage::StorageManager;
 use nv_core::util::timestamp_title;
+use nv_core::wiki::display_title_or_fallback;
+
+/// Sticky editor title: first non-blank content line, live from the buffer.
+/// Reuses the shared `nv_core::wiki` helper (same fallback `(nota vacía)`
+/// as the sidebar rows) so desktop shows one consistent title everywhere.
+/// Pure — unit-tested below without a display server.
+fn sticky_title_for(content: &str) -> String {
+    display_title_or_fallback(content)
+}
 
 /// Handles a los widgets clave de la UI. Los expone `build_ui` para poder
 /// probar el comportamiento responsivo sin depender del display server.
@@ -34,6 +43,7 @@ pub struct UiHandles {
     pub results_panel: GtkBox,
     pub results_list_box: ListBox,
     pub text_view: TextView,
+    pub sticky_title: Label,
     pub is_portrait: Rc<Cell<bool>>,
     pub apply_layout: Rc<dyn Fn(bool)>,
     pub update_results_visibility: Rc<dyn Fn()>,
@@ -386,6 +396,24 @@ pub fn build_ui(app: &Application) -> UiHandles {
         .hscrollbar_policy(gtk4::PolicyType::Never)
         .vexpand(true)
         .build();
+
+    // Sticky title header: pinned above the scrolled editor (outside
+    // `text_scroll`, so it never scrolls away) showing the first non-blank
+    // content line live. The body keeps line 1 intact — no buffer surgery —
+    // so at the very top the title reads twice (header + first line) until
+    // the user scrolls. Saved text stays byte-identical.
+    let sticky_title = Label::new(Some("(nota vacía)"));
+    sticky_title.set_halign(Align::Fill);
+    sticky_title.set_xalign(0.0);
+    sticky_title.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    sticky_title.set_hexpand(true);
+    sticky_title.add_css_class("heading");
+    sticky_title.set_margin_start(16);
+    sticky_title.set_margin_end(16);
+    sticky_title.set_margin_top(8);
+    sticky_title.set_margin_bottom(4);
+    sticky_title.set_tooltip_text(Some("(nota vacía)"));
+    editor_box.append(&sticky_title);
 
     let editor_overlay = Overlay::new();
     editor_overlay.set_child(Some(&text_scroll));
@@ -932,6 +960,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
         let text_view = text_view.clone();
         let active_list_box = active_list_box.clone();
         let info_label = info_label.clone();
+        let sticky_title = sticky_title.clone();
         let flush_pending_save = flush_pending_save.clone();
         let wiki = wiki.clone();
 
@@ -958,6 +987,10 @@ pub fn build_ui(app: &Application) -> UiHandles {
             if let Some(content) = content_to_set {
                 let buffer = text_view.buffer();
                 buffer.set_text(&content);
+
+                let title = sticky_title_for(&content);
+                sticky_title.set_text(&title);
+                sticky_title.set_tooltip_text(Some(&title));
 
                 let words = content.split_whitespace().count();
                 let chars = content.chars().count();
@@ -1126,6 +1159,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
     text_view.buffer().connect_changed({
         let state = Rc::clone(&state);
         let info_label = info_label.clone();
+        let sticky_title = sticky_title.clone();
         let wiki = wiki.clone();
 
         move |buffer| {
@@ -1138,6 +1172,10 @@ pub fn build_ui(app: &Application) -> UiHandles {
                 let (start, end) = buffer.bounds();
                 buffer.text(&start, &end, true).to_string()
             };
+
+            let title = sticky_title_for(&text);
+            sticky_title.set_text(&title);
+            sticky_title.set_tooltip_text(Some(&title));
 
             let words = text.split_whitespace().count();
             let chars = text.chars().count();
@@ -1550,6 +1588,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
         results_panel: results_panel.clone(),
         results_list_box: results_list_box.clone(),
         text_view: text_view.clone(),
+        sticky_title: sticky_title.clone(),
         is_portrait: Rc::clone(&is_portrait),
         apply_layout,
         update_results_visibility,
@@ -1575,6 +1614,19 @@ mod tests {
                 ctx.iteration(false);
             }
         }
+    }
+
+    #[test]
+    fn sticky_title_for_skips_blanks_and_falls_back() {
+        // Empty note: shared fallback, never empty, never crashes.
+        assert_eq!(sticky_title_for(""), "(nota vacía)");
+        assert_eq!(sticky_title_for("   \n\t\n  "), "(nota vacía)");
+        // Leading blank lines are skipped; first live line wins verbatim.
+        assert_eq!(sticky_title_for("\n  \nHola\nmundo"), "Hola");
+        assert_eq!(sticky_title_for("  # Título\ncuerpo"), "# Título");
+        // Unicode titles survive intact (visual ellipsis only, never in data).
+        assert_eq!(sticky_title_for("\n\n日本語タイトル\ncuerpo"), "日本語タイトル");
+        assert_eq!(sticky_title_for("café ☕ mañana"), "café ☕ mañana");
     }
 
     #[test]
