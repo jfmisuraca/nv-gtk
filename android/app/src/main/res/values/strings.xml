@@ -35,6 +35,8 @@
     <string name="wiki_no_matches">Sin coincidencias</string>
     <string name="wiki_open_link">Abrir «%1$s»</string>
     <string name="wiki_suggestions_label">Sugerencias de enlaces</string>
+    <string name="preview_action">Vista previa</string>
+    <string name="edit_action">Editar</string>
 
     <!-- Trash screen -->
     <string name="trash_title">Papelera</string>
