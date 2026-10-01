@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use gtk4::gdk::{self, Key};
 use gtk4::glib;
@@ -203,6 +204,7 @@ enum ShortcutAction {
     ThemePicker,
     OpenShortcuts,
     EscapeContextual,
+    RandomNote,
 }
 
 struct WindowShortcut {
@@ -294,6 +296,14 @@ const WINDOW_SHORTCUTS: &[WindowShortcut] = &[
         keys_label: "Ctrl+?",
         description: "Mostrar esta ventana",
         action: ShortcutAction::OpenShortcuts,
+    },
+    WindowShortcut {
+        key: Key::g,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+G",
+        description: "Nota aleatoria",
+        action: ShortcutAction::RandomNote,
     },
     WindowShortcut {
         key: Key::Escape,
@@ -1511,9 +1521,11 @@ pub fn build_ui(app: &Application) -> UiHandles {
         }
     };
 
-    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+T, Ctrl+R, Ctrl+J, Ctrl+K, Ctrl+P)
+    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+T, Ctrl+R, Ctrl+J, Ctrl+K, Ctrl+P, Ctrl+G)
     let key_controller = EventControllerKey::new();
     key_controller.connect_key_pressed({
+        let state = Rc::clone(&state);
+        let select_note_by_id = select_note_by_id.clone();
         let search_entry = search_entry.clone();
         let _list_box = list_box.clone();
         let text_view = text_view.clone();
@@ -1550,6 +1562,30 @@ pub fn build_ui(app: &Application) -> UiHandles {
                 ShortcutAction::RenameNote => rename_current_note(),
                 ShortcutAction::ThemePicker => theme_button.popup(),
                 ShortcutAction::OpenShortcuts => open_shortcuts(),
+                ShortcutAction::RandomNote => {
+                    // Nota aleatoria: de la lista filtrada si hay filtro
+                    // activo, si no de todas las notas. Lista vacía = no-op.
+                    let target_id = {
+                        let st = state.borrow();
+                        let pool: Vec<String> = if st.filtered_indices.is_empty() {
+                            st.storage.notes.iter().map(|n| n.id.clone()).collect()
+                        } else {
+                            st.filtered_indices.clone()
+                        };
+                        if pool.is_empty() {
+                            None
+                        } else {
+                            let nanos = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map(|d| d.subsec_nanos() as usize)
+                                .unwrap_or(0);
+                            pool.get(nanos % pool.len()).cloned()
+                        }
+                    };
+                    if let Some(id) = target_id {
+                        select_note_by_id(&id);
+                    }
+                }
                 ShortcutAction::EscapeContextual => {
                     // En vertical, Esc cierra el overlay de resultados si está
                     // visible; si no, enfoca el buscador (comportamiento previo).
@@ -1670,6 +1706,7 @@ mod tests {
             ShortcutAction::ThemePicker,
             ShortcutAction::OpenShortcuts,
             ShortcutAction::EscapeContextual,
+            ShortcutAction::RandomNote,
         ] {
             assert!(
                 WINDOW_SHORTCUTS.iter().any(|s| s.action == action),
