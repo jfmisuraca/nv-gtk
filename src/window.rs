@@ -6,7 +6,7 @@ use gtk4::gdk::{self, Key};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, Button, CheckButton, Entry, EventControllerKey, GestureClick, Label,
+    Align, Box as GtkBox, Button, CheckButton, Entry, EventControllerKey, Label,
     ListBox, ListBoxRow, MenuButton, Orientation, Overlay, Paned, Popover, ScrolledWindow,
     SearchEntry, SelectionMode, TextView, Window,
 };
@@ -768,6 +768,10 @@ pub fn build_ui(app: &Application) -> UiHandles {
         // `connect_search_changed` existente. Sin fecha de creación.
         let meta_box = GtkBox::new(Orientation::Horizontal, 6);
         meta_box.set_hexpand(true);
+        // Blanco de click generoso: la fila meta es un poco más alta para
+        // que los tags-botón sean fáciles de acertar con el mouse.
+        meta_box.set_margin_top(3);
+        meta_box.set_margin_bottom(3);
         let date_label = Label::new(Some(&note.formatted_date()));
         date_label.set_halign(Align::Start);
         date_label.set_xalign(0.0);
@@ -777,18 +781,20 @@ pub fn build_ui(app: &Application) -> UiHandles {
         date_label.set_tooltip_text(Some(&note.formatted_date()));
         meta_box.append(&date_label);
         for tag in &note.tags {
-            let tag_label = Label::new(Some(&format!("#{tag}")));
-            tag_label.set_halign(Align::Start);
-            tag_label.set_xalign(0.0);
-            tag_label.add_css_class("caption");
-            tag_label.add_css_class("nv-tag");
-            tag_label.set_cursor_from_name(Some("pointer"));
-            tag_label.set_tooltip_text(Some(&format!("Filtrar por #{tag}")));
-            let click = GestureClick::new();
+            // Button plano en vez de Label+GestureClick: el ListBoxRow
+            // reclama el click en fase bubble para selección/activación y
+            // el handler del tag nunca corría. Los botones sí reciben el
+            // click dentro de la row, así que el filtro por tag funciona.
+            let tag_button = Button::with_label(&format!("#{tag}"));
+            tag_button.add_css_class("flat");
+            tag_button.add_css_class("caption");
+            tag_button.add_css_class("nv-tag");
+            tag_button.set_focusable(false);
+            tag_button.set_tooltip_text(Some(&format!("Filtrar por #{tag}")));
             {
                 let search_entry = search_entry.clone();
                 let wanted = format!("#{tag}");
-                click.connect_pressed(move |_, _, _, _| {
+                tag_button.connect_clicked(move |_| {
                     if search_entry.text().as_str() == wanted {
                         search_entry.set_text("");
                     } else {
@@ -796,8 +802,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
                     }
                 });
             }
-            tag_label.add_controller(click);
-            meta_box.append(&tag_label);
+            meta_box.append(&tag_button);
         }
 
         row_box.append(&title_label);
