@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -231,7 +230,9 @@ fun NotesListScreen(
                                 Column(Modifier.padding(20.dp)) {
                                     Text(
                                         displayTitle(note.content, emptyTitle),
-                                        style = MaterialTheme.typography.titleMedium
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontSize = 18.sp
+                                        )
                                     )
                                     // Preview starts at the SECOND non-blank line
                                     // so it never repeats the title; hidden when
@@ -241,7 +242,9 @@ fun NotesListScreen(
                                         Spacer(Modifier.height(4.dp))
                                         Text(
                                             remainder.take(140),
-                                            style = MaterialTheme.typography.bodyMedium,
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontSize = 15.sp
+                                            ),
                                             maxLines = 3
                                         )
                                     }
@@ -252,25 +255,25 @@ fun NotesListScreen(
                                     // LaunchedEffect(query) + refresh() + Clear
                                     // X existentes hacen el resto.
                                     Spacer(Modifier.height(4.dp))
-                                    // Fila meta con target táctil generoso
-                                    // (convención 48dp): min-height + padding
-                                    // vertical en cada tag; el toggle
+                                    // Fila meta: tipografía un punto más grande
+                                    // (labelSmall queda chica); el toggle
                                     // onQueryChange queda intacto.
-                                    Row(
-                                        modifier = Modifier.heightIn(min = 48.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
+                                    Row {
                                         Text(
                                             formatModifiedMs(note.modifiedMs),
-                                            style = MaterialTheme.typography.labelSmall
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontSize = 13.sp
+                                            )
                                         )
                                         note.tags.forEach { tag ->
                                             Text(
                                                 "#$tag",
-                                                style = MaterialTheme.typography.labelSmall,
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = 13.sp
+                                                ),
                                                 color = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier
-                                                    .padding(start = 6.dp, top = 12.dp, bottom = 12.dp)
+                                                    .padding(start = 6.dp)
                                                     .clickable {
                                                         val wanted = "#$tag"
                                                         onQueryChange(if (query == wanted) "" else wanted)

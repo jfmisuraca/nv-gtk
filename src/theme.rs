@@ -217,12 +217,10 @@ const DARK_BLOCK: &str = r#"
 /// stays green without new `@define-color` entries.
 const COMMON_BLOCK: &str = r#"
 .nv-tag {
-    color: @accent_color;
-    background-color: alpha(@accent_color, 0.15);
+    color: @accent_fg_color;
+    background-color: @accent_bg_color;
     border-radius: 4px;
-    padding: 0 4px;
-    text-decoration-line: underline;
-    text-decoration-color: alpha(@accent_color, 0.6);
+    padding: 1px 6px;
 }
 "#;
 
