@@ -5,9 +5,9 @@ use gtk4::gdk::{self, Key};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, Button, CheckButton, Entry, EventControllerKey, Label, ListBox,
-    ListBoxRow, MenuButton, Orientation, Overlay, Paned, Popover, ScrolledWindow, SearchEntry,
-    SelectionMode, TextView, Window,
+    Align, Box as GtkBox, Button, CheckButton, Entry, EventControllerKey, GestureClick, Label,
+    ListBox, ListBoxRow, MenuButton, Orientation, Overlay, Paned, Popover, ScrolledWindow,
+    SearchEntry, SelectionMode, TextView, Window,
 };
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
@@ -722,8 +722,12 @@ pub fn build_ui(app: &Application) -> UiHandles {
 
     // Helper functions for UI refresh
     // Construye una fila de lista para una nota; la comparten la sidebar y el
-    // overlay de resultados del modo vertical.
-    let build_note_row = move |note: &nv_core::note::Note| -> ListBoxRow {
+    // overlay de resultados del modo vertical. Los tags son clickeables:
+    // filtran la lista vía `search_entry` (el `connect_search_changed`
+    // existente re-filtra y repuebla, sin tocar `filtered_indices` a mano).
+    let build_note_row = {
+        let search_entry = search_entry.clone();
+        Rc::new(move |note: &nv_core::note::Note| -> ListBoxRow {
         let row_box = GtkBox::new(Orientation::Vertical, 2);
         row_box.set_margin_start(10);
         row_box.set_margin_end(10);
@@ -748,28 +752,50 @@ pub fn build_ui(app: &Application) -> UiHandles {
         title_label.set_tooltip_text(Some(&display_title));
 
         // Meta de la fila (parity slice 1): SOLO fecha/hora de modificación
-        // (formato canónico `formatted_date`) + tags. Sin fecha de creación.
-        let meta_str = if note.tags.is_empty() {
-            note.formatted_date()
-        } else {
-            format!("{} • {}", note.formatted_date(), note.tags.join(" "))
-        };
-        let meta_label = Label::new(Some(&meta_str));
-        meta_label.set_halign(Align::Fill);
-        meta_label.set_xalign(0.0);
-        meta_label.add_css_class("caption");
-        meta_label.add_css_class("dim-label");
-        meta_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        meta_label.set_max_width_chars(1);
-        meta_label.set_hexpand(true);
-        meta_label.set_tooltip_text(Some(&meta_str));
+        // (formato canónico `formatted_date`) + un widget por tag. Cada tag
+        // es clickeable y filtra la lista vía `search_entry` (toggle: si la
+        // query ya es `#tag`, la limpia). El re-filtrado lo hace la señal
+        // `connect_search_changed` existente. Sin fecha de creación.
+        let meta_box = GtkBox::new(Orientation::Horizontal, 6);
+        meta_box.set_hexpand(true);
+        let date_label = Label::new(Some(&note.formatted_date()));
+        date_label.set_halign(Align::Start);
+        date_label.set_xalign(0.0);
+        date_label.add_css_class("caption");
+        date_label.add_css_class("dim-label");
+        date_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        date_label.set_tooltip_text(Some(&note.formatted_date()));
+        meta_box.append(&date_label);
+        for tag in &note.tags {
+            let tag_label = Label::new(Some(&format!("#{tag}")));
+            tag_label.set_halign(Align::Start);
+            tag_label.set_xalign(0.0);
+            tag_label.add_css_class("caption");
+            tag_label.add_css_class("dim-label");
+            tag_label.set_tooltip_text(Some(&format!("Filtrar por #{tag}")));
+            let click = GestureClick::new();
+            {
+                let search_entry = search_entry.clone();
+                let wanted = format!("#{tag}");
+                click.connect_pressed(move |_, _, _, _| {
+                    if search_entry.text().as_str() == wanted {
+                        search_entry.set_text("");
+                    } else {
+                        search_entry.set_text(&wanted);
+                    }
+                });
+            }
+            tag_label.add_controller(click);
+            meta_box.append(&tag_label);
+        }
 
         row_box.append(&title_label);
-        row_box.append(&meta_label);
+        row_box.append(&meta_box);
 
         let row = ListBoxRow::new();
         row.set_child(Some(&row_box));
         row
+        })
     };
 
     // Reconstruye la lista desde el estado REAL de storage (NOTA: usa `filtered_indices` ya
@@ -1551,9 +1577,12 @@ pub fn build_ui(app: &Application) -> UiHandles {
                 ShortcutAction::ThemePicker => theme_button.popup(),
                 ShortcutAction::OpenShortcuts => open_shortcuts(),
                 ShortcutAction::EscapeContextual => {
-                    // En vertical, Esc cierra el overlay de resultados si está
-                    // visible; si no, enfoca el buscador (comportamiento previo).
-                    if is_portrait.get() && results_panel.is_visible() {
+                    // Con query activa, Esc la limpia (la señal
+                    // `search_changed` repuebla la lista); si no,
+                    // comportamiento previo.
+                    if !search_entry.text().trim().is_empty() {
+                        search_entry.set_text("");
+                    } else if is_portrait.get() && results_panel.is_visible() {
                         set_results_visible(false);
                         text_view.grab_focus();
                     } else {
