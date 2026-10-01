@@ -815,6 +815,11 @@ pub fn build_ui(app: &Application) -> UiHandles {
     // y de resultados van ENCIMA, así que no se rompen) y alterna qué hijo
     // se muestra. Nombres fijos para el test del toggle.
     let editor_stack = Stack::new();
+    // Sin animación: el toggle edición/preview es un cambio de modo, no una
+    // navegación. El crossfade snapshottea al hijo entrante antes de tener
+    // allocation y GTK protesta (`Trying to snapshot GtkGizmo without a
+    // current allocation`).
+    editor_stack.set_transition_type(gtk4::StackTransitionType::None);
     editor_stack.add_named(&text_scroll, Some("editor"));
     editor_stack.add_named(&preview_scroll, Some("preview"));
     editor_stack.set_visible_child_name("editor");
