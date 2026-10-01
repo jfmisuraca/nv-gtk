@@ -1556,6 +1556,65 @@ pub fn build_ui(app: &Application) -> UiHandles {
         preview_view.add_controller(click);
     }
 
+    // Atajos vim locales de la preview (solo-lectura): `j`/`k` por línea,
+    // `Ctrl+B`/`Ctrl+F` por página. Controller propio sobre `preview_view`:
+    // solo dispara con foco en la preview (el buscador/editor no se tocan)
+    // y corre antes que el handler global de la ventana en fase bubble, así
+    // que `Propagation::Stop` evita que `Ctrl+F` dispare el foco al buscador.
+    // No son atajos globales: no van a WINDOW_SHORTCUTS.
+    {
+        let key_view = preview_view.clone();
+        let key_scroll = preview_scroll.clone();
+        let key_stack = editor_stack.clone();
+        let key_shown = Rc::clone(&preview_shown);
+        let preview_keys = EventControllerKey::new();
+        preview_keys.connect_key_pressed(move |_, key, _, modifier| {
+            if !key_shown.get() {
+                return glib::Propagation::Proceed;
+            }
+            if key_stack.visible_child_name().as_deref() != Some("preview") {
+                return glib::Propagation::Proceed;
+            }
+            if !key_view.has_focus() {
+                return glib::Propagation::Proceed;
+            }
+            let is_ctrl = modifier.contains(gdk::ModifierType::CONTROL_MASK);
+            if !is_ctrl && (key == Key::j || key == Key::k) {
+                let buffer = key_view.buffer();
+                let mut iter = buffer.iter_at_mark(&buffer.get_insert());
+                let moved = if key == Key::j {
+                    iter.forward_line()
+                } else {
+                    iter.backward_line()
+                };
+                // Bordes (primera/última línea): no-op silencioso.
+                if !moved {
+                    return glib::Propagation::Stop;
+                }
+                buffer.place_cursor(&iter);
+                key_view.scroll_to_mark(&buffer.get_insert(), 0.0, false, 0.0, 0.0);
+                return glib::Propagation::Stop;
+            }
+            if is_ctrl && (key == Key::b || key == Key::f) {
+                let adj = key_scroll.vadjustment();
+                let lower = adj.lower();
+                let upper = adj.upper();
+                let page = adj.page_size();
+                let max = (upper - page).max(lower);
+                let mut value = adj.value();
+                if key == Key::f {
+                    value += page;
+                } else {
+                    value -= page;
+                }
+                adj.set_value(value.clamp(lower, max));
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        preview_view.add_controller(preview_keys);
+    }
+
     // Toggle edición/preview (Ctrl+E). Entrar renderiza el texto actual;
     // salir vuelve al editor con foco. El sticky title no se toca: sigue
     // mostrando el título vivo como siempre.
