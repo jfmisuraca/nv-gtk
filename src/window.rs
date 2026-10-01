@@ -8,7 +8,7 @@ use gtk4::prelude::*;
 use gtk4::{
     Align, Box as GtkBox, Button, CheckButton, Entry, EventControllerKey, Label,
     ListBox, ListBoxRow, MenuButton, Orientation, Overlay, Paned, Popover, ScrolledWindow,
-    SearchEntry, SelectionMode, TextView, Window,
+    SearchEntry, SelectionMode, Stack, TextView, Window,
 };
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
@@ -31,6 +31,198 @@ fn sticky_title_for(content: &str) -> String {
     display_title_or_fallback(content)
 }
 
+/// Estilo inline de un tramo de markdown renderizado. Salida pura del
+/// parser (`markdown_spans`, sin GTK) para poder testearla sin display;
+/// `render_markdown_to_buffer` los aplica como TextTags sobre el buffer.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum MdStyle {
+    H1,
+    H2,
+    H3,
+    Bold,
+    Italic,
+    Code,
+    Link,
+}
+
+/// Tramo de texto con sus estilos activos. El texto ya viene segmentado por
+/// bloque (los `\n` de separación son spans propios sin estilo).
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct RichSpan {
+    text: String,
+    styles: Vec<MdStyle>,
+}
+
+fn md_tag_name(style: MdStyle) -> &'static str {
+    match style {
+        MdStyle::H1 => "md-h1",
+        MdStyle::H2 => "md-h2",
+        MdStyle::H3 => "md-h3",
+        MdStyle::Bold => "md-bold",
+        MdStyle::Italic => "md-italic",
+        MdStyle::Code => "md-code",
+        MdStyle::Link => "md-link",
+    }
+}
+
+/// Parsea markdown (CommonMark vía `pulldown-cmark`) a tramos con estilo.
+/// Subset garantizado: headings, bold, italic, code inline/bloque, listas
+/// (bullet + ordenadas), links como `texto (url)`, reglas horizontales.
+/// Pura — testeable sin display.
+fn markdown_spans(text: &str) -> Vec<RichSpan> {
+    use pulldown_cmark::{Event, Parser, Tag, TagEnd};
+    let mut spans: Vec<RichSpan> = Vec::new();
+    let mut styles: Vec<MdStyle> = Vec::new();
+    // Pila de listas: (ordenada, próximo número).
+    let mut lists: Vec<(bool, u64)> = Vec::new();
+    // Destinos de links/imágenes pendientes (uno por Start anidado).
+    let mut link_dests: Vec<String> = Vec::new();
+
+    let mut push = |spans: &mut Vec<RichSpan>, s: &str, styles: &[MdStyle]| {
+        if !s.is_empty() {
+            spans.push(RichSpan {
+                text: s.to_string(),
+                styles: styles.to_vec(),
+            });
+        }
+    };
+
+    for event in Parser::new(text) {
+        match event {
+            Event::Start(tag) => match tag {
+                Tag::Heading { level, .. } => {
+                    use pulldown_cmark::HeadingLevel::*;
+                    styles.push(match level {
+                        H1 => MdStyle::H1,
+                        H2 => MdStyle::H2,
+                        _ => MdStyle::H3,
+                    });
+                }
+                Tag::Strong => styles.push(MdStyle::Bold),
+                Tag::Emphasis => styles.push(MdStyle::Italic),
+                Tag::CodeBlock(_) => styles.push(MdStyle::Code),
+                Tag::List(first) => {
+                    lists.push((first.is_some(), first.unwrap_or(1)));
+                }
+                Tag::Item => {
+                    let depth = lists.len().max(1);
+                    let indent = "  ".repeat(depth - 1);
+                    let bullet = match lists.last_mut() {
+                        Some((true, n)) => {
+                            let b = format!("{n}. ");
+                            *n += 1;
+                            b
+                        }
+                        _ => "• ".to_string(),
+                    };
+                    push(&mut spans, &format!("{indent}{bullet}"), &styles);
+                }
+                Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. } => {
+                    styles.push(MdStyle::Link);
+                    link_dests.push(dest_url.to_string());
+                }
+                _ => {}
+            },
+            Event::End(tag) => match tag {
+                TagEnd::Heading(_) => {
+                    styles.retain(|s| !matches!(s, MdStyle::H1 | MdStyle::H2 | MdStyle::H3));
+                    push(&mut spans, "\n\n", &[]);
+                }
+                TagEnd::Paragraph => push(&mut spans, "\n\n", &[]),
+                TagEnd::CodeBlock => {
+                    styles.retain(|s| *s != MdStyle::Code);
+                    push(&mut spans, "\n", &[]);
+                }
+                TagEnd::Item => push(&mut spans, "\n", &[]),
+                TagEnd::List(_) => {
+                    lists.pop();
+                    push(&mut spans, "\n", &[]);
+                }
+                TagEnd::Link | TagEnd::Image => {
+                    styles.retain(|s| *s != MdStyle::Link);
+                    if let Some(dest) = link_dests.pop() {
+                        push(&mut spans, &format!(" ({dest})"), &[MdStyle::Link]);
+                    }
+                }
+                TagEnd::BlockQuote(_) => push(&mut spans, "\n\n", &[]),
+                TagEnd::Table => push(&mut spans, "\n", &[]),
+                TagEnd::TableHead | TagEnd::TableRow => push(&mut spans, "\n", &[]),
+                TagEnd::TableCell => push(&mut spans, " | ", &[]),
+                _ => {}
+            },
+            Event::Text(t) => push(&mut spans, &t, &styles),
+            Event::Code(c) => {
+                let mut with_code = styles.clone();
+                if !with_code.contains(&MdStyle::Code) {
+                    with_code.push(MdStyle::Code);
+                }
+                push(&mut spans, &c, &with_code);
+            }
+            Event::SoftBreak | Event::HardBreak => push(&mut spans, "\n", &[]),
+            Event::Rule => push(&mut spans, "───\n\n", &[]),
+            Event::Html(_) | Event::InlineHtml(_) | Event::FootnoteReference(_) => {}
+            Event::TaskListMarker(_) => {}
+            // Eventos de metadata/tablas que no aportan texto visible.
+            _ => {}
+        }
+    }
+    // Recortar newlines colgantes del final (el último bloque no necesita
+    // separación posterior).
+    while let Some(last) = spans.last_mut() {
+        let trimmed = last.text.trim_end_matches('\n').to_string();
+        if trimmed.is_empty() && last.styles.is_empty() {
+            spans.pop();
+        } else {
+            last.text = trimmed;
+            break;
+        }
+    }
+    spans
+}
+
+/// Crea los TextTags de preview en el buffer si aún no existen. Sin colores
+/// fijos: peso/escala/monospace/subrayado heredan el foreground del tema.
+fn ensure_preview_tags(buffer: &gtk4::TextBuffer) {
+    use gtk4::pango;
+    if buffer.tag_table().lookup(md_tag_name(MdStyle::H1)).is_some() {
+        return;
+    }
+    let tag = |name: &str| {
+        let t = gtk4::TextTag::new(Some(name));
+        buffer.tag_table().add(&t);
+        t
+    };
+    let h1 = tag(md_tag_name(MdStyle::H1));
+    h1.set_scale(1.5);
+    h1.set_weight(700);
+    let h2 = tag(md_tag_name(MdStyle::H2));
+    h2.set_scale(1.3);
+    h2.set_weight(700);
+    let h3 = tag(md_tag_name(MdStyle::H3));
+    h3.set_scale(1.15);
+    h3.set_weight(700);
+    let bold = tag(md_tag_name(MdStyle::Bold));
+    bold.set_weight(700);
+    let italic = tag(md_tag_name(MdStyle::Italic));
+    italic.set_style(pango::Style::Italic);
+    let code = tag(md_tag_name(MdStyle::Code));
+    code.set_family(Some("monospace"));
+    let link = tag(md_tag_name(MdStyle::Link));
+    link.set_underline(pango::Underline::Single);
+}
+
+/// Renderiza markdown al buffer de preview (reemplazo total). El buffer del
+/// editor no se toca: el contenido y el cursor se preservan solos.
+fn render_markdown_to_buffer(text: &str, buffer: &gtk4::TextBuffer) {
+    ensure_preview_tags(buffer);
+    buffer.set_text("");
+    for span in markdown_spans(text) {
+        let names: Vec<&str> = span.styles.iter().map(|s| md_tag_name(*s)).collect();
+        let mut end = buffer.end_iter();
+        buffer.insert_with_tags_by_name(&mut end, &span.text, &names);
+    }
+}
+
 /// Handles a los widgets clave de la UI. Los expone `build_ui` para poder
 /// probar el comportamiento responsivo sin depender del display server.
 #[derive(Clone)]
@@ -44,6 +236,9 @@ pub struct UiHandles {
     pub results_panel: GtkBox,
     pub results_list_box: ListBox,
     pub text_view: TextView,
+    pub editor_stack: Stack,
+    pub preview_view: TextView,
+    pub toggle_preview: Rc<dyn Fn()>,
     pub sticky_title: Label,
     pub is_portrait: Rc<Cell<bool>>,
     pub apply_layout: Rc<dyn Fn(bool)>,
@@ -205,6 +400,7 @@ enum ShortcutAction {
     OpenShortcuts,
     EscapeContextual,
     RandomNote,
+    TogglePreview,
 }
 
 struct WindowShortcut {
@@ -304,6 +500,14 @@ const WINDOW_SHORTCUTS: &[WindowShortcut] = &[
         keys_label: "Ctrl+G",
         description: "Nota aleatoria",
         action: ShortcutAction::RandomNote,
+    },
+    WindowShortcut {
+        key: Key::e,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+E",
+        description: "Alternar vista previa",
+        action: ShortcutAction::TogglePreview,
     },
     WindowShortcut {
         key: Key::Escape,
@@ -407,6 +611,34 @@ pub fn build_ui(app: &Application) -> UiHandles {
         .vexpand(true)
         .build();
 
+    // Vista previa de solo lectura: mismo padding que el editor para que el
+    // texto no "salte" al alternar. No editable, cursor invisible.
+    let preview_view = TextView::builder()
+        .wrap_mode(gtk4::WrapMode::WordChar)
+        .monospace(false)
+        .editable(false)
+        .cursor_visible(false)
+        .left_margin(16)
+        .right_margin(16)
+        .top_margin(16)
+        .bottom_margin(16)
+        .build();
+
+    let preview_scroll = ScrolledWindow::builder()
+        .child(&preview_view)
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .vexpand(true)
+        .build();
+
+    // Stack edición/preview: vive como child del overlay (los overlays wiki
+    // y de resultados van ENCIMA, así que no se rompen) y alterna qué hijo
+    // se muestra. Nombres fijos para el test del toggle.
+    let editor_stack = Stack::new();
+    editor_stack.add_named(&text_scroll, Some("editor"));
+    editor_stack.add_named(&preview_scroll, Some("preview"));
+    editor_stack.set_visible_child_name("editor");
+    let preview_shown: Rc<Cell<bool>> = Rc::new(Cell::new(false));
+
     // Sticky title header: pinned above the scrolled editor (outside
     // `text_scroll`, so it never scrolls away) showing the first non-blank
     // content line live. The body keeps line 1 intact — no buffer surgery —
@@ -426,7 +658,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
     editor_box.append(&sticky_title);
 
     let editor_overlay = Overlay::new();
-    editor_overlay.set_child(Some(&text_scroll));
+    editor_overlay.set_child(Some(&editor_stack));
     editor_box.append(&editor_overlay);
 
     // Panel de resultados para el modo vertical: overlay con la lista de notas
@@ -997,6 +1229,45 @@ pub fn build_ui(app: &Application) -> UiHandles {
         }
     };
 
+    // Renderiza el texto ACTUAL del buffer del editor en la vista previa.
+    // No toca el buffer del editor: contenido y cursor se preservan solos.
+    let render_preview = {
+        let text_view = text_view.clone();
+        let preview_view = preview_view.clone();
+
+        move || {
+            let buffer = text_view.buffer();
+            let (start, end) = buffer.bounds();
+            let text = buffer.text(&start, &end, true).to_string();
+            drop(buffer);
+            render_markdown_to_buffer(&text, &preview_view.buffer());
+        }
+    };
+
+    // Toggle edición/preview (Ctrl+E). Entrar renderiza el texto actual;
+    // salir vuelve al editor con foco. El sticky title no se toca: sigue
+    // mostrando el título vivo como siempre.
+    let toggle_preview: Rc<dyn Fn()> = Rc::new({
+        let editor_stack = editor_stack.clone();
+        let text_view = text_view.clone();
+        let preview_view = preview_view.clone();
+        let preview_shown = Rc::clone(&preview_shown);
+        let render_preview = render_preview.clone();
+
+        move || {
+            if preview_shown.get() {
+                editor_stack.set_visible_child_name("editor");
+                preview_shown.set(false);
+                text_view.grab_focus();
+            } else {
+                render_preview();
+                editor_stack.set_visible_child_name("preview");
+                preview_shown.set(true);
+                preview_view.grab_focus();
+            }
+        }
+    });
+
     let select_note_by_id = {
         let state = Rc::clone(&state);
         let text_view = text_view.clone();
@@ -1004,6 +1275,8 @@ pub fn build_ui(app: &Application) -> UiHandles {
         let info_label = info_label.clone();
         let sticky_title = sticky_title.clone();
         let flush_pending_save = flush_pending_save.clone();
+        let preview_shown = Rc::clone(&preview_shown);
+        let render_preview = render_preview.clone();
         let wiki = wiki.clone();
 
         move |target_id: &str| {
@@ -1029,6 +1302,12 @@ pub fn build_ui(app: &Application) -> UiHandles {
             if let Some(content) = content_to_set {
                 let buffer = text_view.buffer();
                 buffer.set_text(&content);
+
+                // En preview, la nota nueva se muestra renderizada (el modo
+                // se mantiene al navegar, como el sticky que sigue vivo).
+                if preview_shown.get() {
+                    render_preview();
+                }
 
                 let title = sticky_title_for(&content);
                 sticky_title.set_text(&title);
@@ -1571,6 +1850,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
         let move_list_selection = move_list_selection.clone();
         let open_shortcuts = Rc::clone(&open_shortcuts);
         let theme_button = theme_button.clone();
+        let toggle_preview = Rc::clone(&toggle_preview);
 
         move |_, key, _, modifier| {
             let is_ctrl = modifier.contains(gdk::ModifierType::CONTROL_MASK);
@@ -1594,6 +1874,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
                 ShortcutAction::RenameNote => rename_current_note(),
                 ShortcutAction::ThemePicker => theme_button.popup(),
                 ShortcutAction::OpenShortcuts => open_shortcuts(),
+                ShortcutAction::TogglePreview => toggle_preview(),
                 ShortcutAction::RandomNote => {
                     // Nota aleatoria: de la lista filtrada si hay filtro
                     // activo, si no de todas las notas. Lista vacía = no-op.
@@ -1659,6 +1940,9 @@ pub fn build_ui(app: &Application) -> UiHandles {
         results_panel: results_panel.clone(),
         results_list_box: results_list_box.clone(),
         text_view: text_view.clone(),
+        editor_stack: editor_stack.clone(),
+        preview_view: preview_view.clone(),
+        toggle_preview: Rc::clone(&toggle_preview),
         sticky_title: sticky_title.clone(),
         is_portrait: Rc::clone(&is_portrait),
         apply_layout,
@@ -1742,6 +2026,7 @@ mod tests {
             ShortcutAction::OpenShortcuts,
             ShortcutAction::EscapeContextual,
             ShortcutAction::RandomNote,
+            ShortcutAction::TogglePreview,
         ] {
             assert!(
                 WINDOW_SHORTCUTS.iter().any(|s| s.action == action),
@@ -1756,12 +2041,86 @@ mod tests {
         }
     }
 
+    #[test]
+    fn markdown_spans_renders_basic_subset() {
+        let spans = markdown_spans(
+            "# Título\n\nHola **negrita** y *itálica* con `código`.\n\n- uno\n- dos\n\n[enlace](https://ejemplo.com)\n",
+        );
+        let has = |needle: &str, style: MdStyle| {
+            spans
+                .iter()
+                .any(|s| s.text.contains(needle) && s.styles.contains(&style))
+        };
+        assert!(has("Título", MdStyle::H1), "heading con H1: {spans:?}");
+        assert!(has("negrita", MdStyle::Bold));
+        assert!(has("itálica", MdStyle::Italic));
+        assert!(has("código", MdStyle::Code));
+        // Bullets de lista presentes como texto.
+        assert!(
+            spans.iter().any(|s| s.text.contains('•')),
+            "bullets: {spans:?}"
+        );
+        // Links como texto: el texto + la URL visible entre paréntesis.
+        assert!(has("enlace", MdStyle::Link));
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.text.contains("https://ejemplo.com")),
+            "url visible: {spans:?}"
+        );
+        // Texto normal sin estilos arrastrados.
+        let hola = spans.iter().find(|s| s.text.contains("Hola ")).unwrap();
+        assert!(hola.styles.is_empty(), "texto normal limpio: {hola:?}");
+    }
+
+    #[test]
+    fn markdown_spans_code_block_ordered_list_and_rule() {
+        let spans = markdown_spans("1. primero\n2. segundo\n\n```\nlet x = 1;\n```\n\n---\n");
+        assert!(
+            spans.iter().any(|s| s.text.contains("1. ")),
+            "ordenada numera: {spans:?}"
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.text.contains("let x = 1;") && s.styles.contains(&MdStyle::Code)),
+            "bloque de código: {spans:?}"
+        );
+        assert!(
+            spans.iter().any(|s| s.text.contains("───")),
+            "regla: {spans:?}"
+        );
+        // Sin newlines colgantes al final.
+        let last = spans.last().unwrap();
+        assert!(
+            !last.text.ends_with('\n'),
+            "sin trailing newline: {last:?}"
+        );
+    }
+
+    #[test]
+    fn markdown_spans_heading_levels() {
+        let spans = markdown_spans("# uno\n\n## dos\n\n### tres\n");
+        let style_of = |needle: &str| {
+            spans
+                .iter()
+                .find(|s| s.text.contains(needle))
+                .map(|s| s.styles.clone())
+                .unwrap_or_default()
+        };
+        assert!(style_of("uno").contains(&MdStyle::H1));
+        assert!(style_of("dos").contains(&MdStyle::H2));
+        assert!(style_of("tres").contains(&MdStyle::H3));
+    }
+
     // Requiere display: `xvfb-run -a cargo test -- --test-threads=1`
+    // Test único con display (GTK solo permite init desde un hilo y libtest
+    // usa un hilo por test): cubre layout responsivo + toggle de preview.
     // La orientación la dispara el tick callback (probado por smoke: al
     // redimensionar 500x800 el log muestra `apply_layout -> portrait=true`);
     // aquí se usa el seam expuesto para probar el layout de forma determinista.
     #[test]
-    fn responsive_portrait_layout_and_overlay() {
+    fn responsive_layout_overlay_and_preview_toggle() {
         // Requiere un display de verdad: se corre con
         // `xvfb-run -a cargo test -- --test-threads=1`. Sin display el test se
         // omite; la regla pura queda cubierta por `results_overlay_visibility_rule`.
@@ -1819,5 +2178,50 @@ mod tests {
         assert!(handles.list_scroll.is_visible());
         assert!(!handles.results_panel.is_visible());
         assert!(!handles.is_portrait.get());
+
+        // Preview (Ctrl+E lógico): arranca en edición, el toggle renderiza
+        // el texto actual y muestra la preview; el segundo toggle vuelve al
+        // editor con el contenido intacto.
+        assert_eq!(
+            handles.editor_stack.visible_child_name().as_deref(),
+            Some("editor")
+        );
+        handles.text_view.buffer().set_text("# Hola\n\nTexto **fuerte**.");
+        pump(20);
+        (handles.toggle_preview)();
+        pump(20);
+        assert_eq!(
+            handles.editor_stack.visible_child_name().as_deref(),
+            Some("preview")
+        );
+        {
+            let buffer = handles.preview_view.buffer();
+            let (start, end) = buffer.bounds();
+            let rendered = buffer.text(&start, &end, true).to_string();
+            assert!(
+                rendered.contains("Hola") && rendered.contains("fuerte"),
+                "preview con contenido: {rendered:?}"
+            );
+            assert!(
+                !rendered.contains("**") && !rendered.contains('#'),
+                "renderizado, no crudo: {rendered:?}"
+            );
+        }
+        assert!(!handles.preview_view.is_editable());
+        (handles.toggle_preview)();
+        pump(20);
+        assert_eq!(
+            handles.editor_stack.visible_child_name().as_deref(),
+            Some("editor")
+        );
+        {
+            let buffer = handles.text_view.buffer();
+            let (start, end) = buffer.bounds();
+            let back = buffer.text(&start, &end, true).to_string();
+            assert!(
+                back.contains("# Hola"),
+                "el editor conserva el crudo: {back:?}"
+            );
+        }
     }
 }
