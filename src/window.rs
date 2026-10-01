@@ -771,7 +771,8 @@ pub fn build_ui(app: &Application) -> UiHandles {
             tag_label.set_halign(Align::Start);
             tag_label.set_xalign(0.0);
             tag_label.add_css_class("caption");
-            tag_label.add_css_class("dim-label");
+            tag_label.add_css_class("nv-tag");
+            tag_label.set_cursor_from_name(Some("pointer"));
             tag_label.set_tooltip_text(Some(&format!("Filtrar por #{tag}")));
             let click = GestureClick::new();
             {

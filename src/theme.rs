@@ -211,6 +211,21 @@ const DARK_BLOCK: &str = r#"
 }
 "#;
 
+/// Common widget rules shared by both variants (outside the `@media`
+/// blocks to avoid duplication). Only references libadwaita/palette aliases
+/// already defined in BOTH variants, so `scripts/verify-theme.sh` parity
+/// stays green without new `@define-color` entries.
+const COMMON_BLOCK: &str = r#"
+.nv-tag {
+    color: @accent_color;
+    background-color: alpha(@accent_color, 0.15);
+    border-radius: 4px;
+    padding: 0 4px;
+    text-decoration-line: underline;
+    text-decoration-color: alpha(@accent_color, 0.6);
+}
+"#;
+
 /// Replaces the `%%NAME%%` tokens in `template` with `palette`'s hex values.
 fn render_block(template: &str, palette: &Palette) -> String {
     let mut css = template.to_string();
@@ -283,6 +298,7 @@ pub(crate) fn build_css(theme: ThemeId) -> String {
     let mut css = render_block(LIGHT_BLOCK, &light);
     css.push('\n');
     css.push_str(&render_block(DARK_BLOCK, &dark));
+    css.push_str(COMMON_BLOCK);
     css
 }
 
