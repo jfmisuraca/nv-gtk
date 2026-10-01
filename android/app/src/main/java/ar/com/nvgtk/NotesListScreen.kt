@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,7 +30,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ElevatedCard
@@ -54,6 +54,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -97,10 +98,20 @@ fun NotesListScreen(
                     IconButton(onClick = onTrash) {
                         Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.trash_action))
                     }
-                    // Random note: opens the editor on a random note from
-                    // the current list (filtered or full). No-op when empty.
+                    // Random note: dado de 6 caras mostrando el 3
+                    // (U+2682 DIE FACE-3). Icons.Filled.Casino vive en
+                    // material-icons-extended (no dependencia) y el core
+                    // no trae ni Casino ni Shuffle, así que se usa texto.
+                    // Reusa el contentDescription existente (random_note).
+                    val randomNoteDesc = stringResource(R.string.random_note)
                     IconButton(onClick = onRandom) {
-                        Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.random_note))
+                        Text(
+                            "⚂",
+                            fontSize = 24.sp,
+                            modifier = Modifier.semantics {
+                                contentDescription = randomNoteDesc
+                            }
+                        )
                     }
                 }
             )
@@ -241,7 +252,14 @@ fun NotesListScreen(
                                     // LaunchedEffect(query) + refresh() + Clear
                                     // X existentes hacen el resto.
                                     Spacer(Modifier.height(4.dp))
-                                    Row {
+                                    // Fila meta con target táctil generoso
+                                    // (convención 48dp): min-height + padding
+                                    // vertical en cada tag; el toggle
+                                    // onQueryChange queda intacto.
+                                    Row(
+                                        modifier = Modifier.heightIn(min = 48.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
                                         Text(
                                             formatModifiedMs(note.modifiedMs),
                                             style = MaterialTheme.typography.labelSmall
@@ -252,7 +270,7 @@ fun NotesListScreen(
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier
-                                                    .padding(start = 6.dp)
+                                                    .padding(start = 6.dp, top = 12.dp, bottom = 12.dp)
                                                     .clickable {
                                                         val wanted = "#$tag"
                                                         onQueryChange(if (query == wanted) "" else wanted)
