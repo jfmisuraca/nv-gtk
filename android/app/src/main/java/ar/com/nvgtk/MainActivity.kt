@@ -349,6 +349,17 @@ private fun NvApp(
                         navController.navigate(editorRoute(found.id), ::applyEditorNavOptions)
                     }
                 },
+                // Random note: same open path as onOpen, picking from the
+                // visible list (filtered results or full notes). Empty = no-op.
+                onRandom = {
+                    val pool = results ?: notes
+                    if (pool.isNotEmpty()) {
+                        val note = pool.random()
+                        editorSnapshots = editorSnapshots + (note.id to note)
+                        editorAutoFocus = false
+                        navController.navigate(editorRoute(note.id), ::applyEditorNavOptions)
+                    }
+                },
                 onQueryChange = { query = it },
                 onTrash = { navController.navigate("trash") },
                 onSettings = { navController.navigate("settings") },

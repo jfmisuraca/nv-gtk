@@ -1,13 +1,14 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use gtk4::gdk::{self, Key};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{
-    Align, Box as GtkBox, Button, CheckButton, Entry, EventControllerKey, Label, ListBox,
-    ListBoxRow, MenuButton, Orientation, Overlay, Paned, Popover, ScrolledWindow, SearchEntry,
-    SelectionMode, TextView, Window,
+    Align, Box as GtkBox, Button, CheckButton, Entry, EventControllerKey, Label,
+    ListBox, ListBoxRow, MenuButton, Orientation, Overlay, Paned, Popover, ScrolledWindow,
+    SearchEntry, SelectionMode, TextView, Window,
 };
 use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
@@ -203,6 +204,7 @@ enum ShortcutAction {
     ThemePicker,
     OpenShortcuts,
     EscapeContextual,
+    RandomNote,
 }
 
 struct WindowShortcut {
@@ -294,6 +296,14 @@ const WINDOW_SHORTCUTS: &[WindowShortcut] = &[
         keys_label: "Ctrl+?",
         description: "Mostrar esta ventana",
         action: ShortcutAction::OpenShortcuts,
+    },
+    WindowShortcut {
+        key: Key::g,
+        with_ctrl: true,
+        section: "Generales",
+        keys_label: "Ctrl+G",
+        description: "Nota aleatoria",
+        action: ShortcutAction::RandomNote,
     },
     WindowShortcut {
         key: Key::Escape,
@@ -722,8 +732,12 @@ pub fn build_ui(app: &Application) -> UiHandles {
 
     // Helper functions for UI refresh
     // Construye una fila de lista para una nota; la comparten la sidebar y el
-    // overlay de resultados del modo vertical.
-    let build_note_row = move |note: &nv_core::note::Note| -> ListBoxRow {
+    // overlay de resultados del modo vertical. Los tags son clickeables:
+    // filtran la lista vía `search_entry` (el `connect_search_changed`
+    // existente re-filtra y repuebla, sin tocar `filtered_indices` a mano).
+    let build_note_row = {
+        let search_entry = search_entry.clone();
+        Rc::new(move |note: &nv_core::note::Note| -> ListBoxRow {
         let row_box = GtkBox::new(Orientation::Vertical, 2);
         row_box.set_margin_start(10);
         row_box.set_margin_end(10);
@@ -748,28 +762,56 @@ pub fn build_ui(app: &Application) -> UiHandles {
         title_label.set_tooltip_text(Some(&display_title));
 
         // Meta de la fila (parity slice 1): SOLO fecha/hora de modificación
-        // (formato canónico `formatted_date`) + tags. Sin fecha de creación.
-        let meta_str = if note.tags.is_empty() {
-            note.formatted_date()
-        } else {
-            format!("{} • {}", note.formatted_date(), note.tags.join(" "))
-        };
-        let meta_label = Label::new(Some(&meta_str));
-        meta_label.set_halign(Align::Fill);
-        meta_label.set_xalign(0.0);
-        meta_label.add_css_class("caption");
-        meta_label.add_css_class("dim-label");
-        meta_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-        meta_label.set_max_width_chars(1);
-        meta_label.set_hexpand(true);
-        meta_label.set_tooltip_text(Some(&meta_str));
+        // (formato canónico `formatted_date`) + un widget por tag. Cada tag
+        // es clickeable y filtra la lista vía `search_entry` (toggle: si la
+        // query ya es `#tag`, la limpia). El re-filtrado lo hace la señal
+        // `connect_search_changed` existente. Sin fecha de creación.
+        let meta_box = GtkBox::new(Orientation::Horizontal, 6);
+        meta_box.set_hexpand(true);
+        // Blanco de click generoso: la fila meta es un poco más alta para
+        // que los tags-botón sean fáciles de acertar con el mouse.
+        meta_box.set_margin_top(3);
+        meta_box.set_margin_bottom(3);
+        let date_label = Label::new(Some(&note.formatted_date()));
+        date_label.set_halign(Align::Start);
+        date_label.set_xalign(0.0);
+        date_label.add_css_class("caption");
+        date_label.add_css_class("dim-label");
+        date_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+        date_label.set_tooltip_text(Some(&note.formatted_date()));
+        meta_box.append(&date_label);
+        for tag in &note.tags {
+            // Button plano en vez de Label+GestureClick: el ListBoxRow
+            // reclama el click en fase bubble para selección/activación y
+            // el handler del tag nunca corría. Los botones sí reciben el
+            // click dentro de la row, así que el filtro por tag funciona.
+            let tag_button = Button::with_label(&format!("#{tag}"));
+            tag_button.add_css_class("flat");
+            tag_button.add_css_class("caption");
+            tag_button.add_css_class("nv-tag");
+            tag_button.set_focusable(false);
+            tag_button.set_tooltip_text(Some(&format!("Filtrar por #{tag}")));
+            {
+                let search_entry = search_entry.clone();
+                let wanted = format!("#{tag}");
+                tag_button.connect_clicked(move |_| {
+                    if search_entry.text().as_str() == wanted {
+                        search_entry.set_text("");
+                    } else {
+                        search_entry.set_text(&wanted);
+                    }
+                });
+            }
+            meta_box.append(&tag_button);
+        }
 
         row_box.append(&title_label);
-        row_box.append(&meta_label);
+        row_box.append(&meta_box);
 
         let row = ListBoxRow::new();
         row.set_child(Some(&row_box));
         row
+        })
     };
 
     // Reconstruye la lista desde el estado REAL de storage (NOTA: usa `filtered_indices` ya
@@ -1511,9 +1553,11 @@ pub fn build_ui(app: &Application) -> UiHandles {
         }
     };
 
-    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+T, Ctrl+R, Ctrl+J, Ctrl+K, Ctrl+P)
+    // Keyboard Controller for Global App Shortcuts (Ctrl+L, Esc, Ctrl+N, Ctrl+D, Ctrl+T, Ctrl+R, Ctrl+J, Ctrl+K, Ctrl+P, Ctrl+G)
     let key_controller = EventControllerKey::new();
     key_controller.connect_key_pressed({
+        let state = Rc::clone(&state);
+        let select_note_by_id = select_note_by_id.clone();
         let search_entry = search_entry.clone();
         let _list_box = list_box.clone();
         let text_view = text_view.clone();
@@ -1550,10 +1594,37 @@ pub fn build_ui(app: &Application) -> UiHandles {
                 ShortcutAction::RenameNote => rename_current_note(),
                 ShortcutAction::ThemePicker => theme_button.popup(),
                 ShortcutAction::OpenShortcuts => open_shortcuts(),
+                ShortcutAction::RandomNote => {
+                    // Nota aleatoria: de la lista filtrada si hay filtro
+                    // activo, si no de todas las notas. Lista vacía = no-op.
+                    let target_id = {
+                        let st = state.borrow();
+                        let pool: Vec<String> = if st.filtered_indices.is_empty() {
+                            st.storage.notes.iter().map(|n| n.id.clone()).collect()
+                        } else {
+                            st.filtered_indices.clone()
+                        };
+                        if pool.is_empty() {
+                            None
+                        } else {
+                            let nanos = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map(|d| d.subsec_nanos() as usize)
+                                .unwrap_or(0);
+                            pool.get(nanos % pool.len()).cloned()
+                        }
+                    };
+                    if let Some(id) = target_id {
+                        select_note_by_id(&id);
+                    }
+                }
                 ShortcutAction::EscapeContextual => {
-                    // En vertical, Esc cierra el overlay de resultados si está
-                    // visible; si no, enfoca el buscador (comportamiento previo).
-                    if is_portrait.get() && results_panel.is_visible() {
+                    // Con query activa, Esc la limpia (la señal
+                    // `search_changed` repuebla la lista); si no,
+                    // comportamiento previo.
+                    if !search_entry.text().trim().is_empty() {
+                        search_entry.set_text("");
+                    } else if is_portrait.get() && results_panel.is_visible() {
                         set_results_visible(false);
                         text_view.grab_focus();
                     } else {
@@ -1670,6 +1741,7 @@ mod tests {
             ShortcutAction::ThemePicker,
             ShortcutAction::OpenShortcuts,
             ShortcutAction::EscapeContextual,
+            ShortcutAction::RandomNote,
         ] {
             assert!(
                 WINDOW_SHORTCUTS.iter().any(|s| s.action == action),

@@ -10,8 +10,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -51,6 +53,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -75,6 +78,7 @@ fun NotesListScreen(
     query: String,
     error: String?,
     onOpen: (String) -> Unit,
+    onRandom: () -> Unit,
     onQueryChange: (String) -> Unit,
     onTrash: () -> Unit,
     onSettings: () -> Unit,
@@ -92,6 +96,21 @@ fun NotesListScreen(
                     }
                     IconButton(onClick = onTrash) {
                         Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.trash_action))
+                    }
+                    // Random note: dado de 6 caras mostrando el 3
+                    // (U+2682 DIE FACE-3). Icons.Filled.Casino vive en
+                    // material-icons-extended (no dependencia) y el core
+                    // no trae ni Casino ni Shuffle, así que se usa texto.
+                    // Reusa el contentDescription existente (random_note).
+                    val randomNoteDesc = stringResource(R.string.random_note)
+                    IconButton(onClick = onRandom) {
+                        Text(
+                            "⚂",
+                            fontSize = 24.sp,
+                            modifier = Modifier.semantics {
+                                contentDescription = randomNoteDesc
+                            }
+                        )
                     }
                 }
             )
@@ -211,7 +230,9 @@ fun NotesListScreen(
                                 Column(Modifier.padding(20.dp)) {
                                     Text(
                                         displayTitle(note.content, emptyTitle),
-                                        style = MaterialTheme.typography.titleMedium
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontSize = 18.sp
+                                        )
                                     )
                                     // Preview starts at the SECOND non-blank line
                                     // so it never repeats the title; hidden when
@@ -221,24 +242,45 @@ fun NotesListScreen(
                                         Spacer(Modifier.height(4.dp))
                                         Text(
                                             remainder.take(140),
-                                            style = MaterialTheme.typography.bodyMedium,
+                                            style = MaterialTheme.typography.bodyMedium.copy(
+                                                fontSize = 15.sp
+                                            ),
                                             maxLines = 3
                                         )
                                     }
                                     // Parity slice 1 (T2): SOLO fecha/hora de
-                                    // modificación (+ tags), mismo formato
-                                    // canónico que desktop.
+                                    // modificación (+ tags clickeables que
+                                    // filtran vía onQueryChange, con toggle),
+                                    // mismo formato canónico que desktop. El
+                                    // LaunchedEffect(query) + refresh() + Clear
+                                    // X existentes hacen el resto.
                                     Spacer(Modifier.height(4.dp))
-                                    val meta = if (note.tags.isEmpty()) {
-                                        formatModifiedMs(note.modifiedMs)
-                                    } else {
-                                        formatModifiedMs(note.modifiedMs) + " • " +
-                                            note.tags.joinToString(" ") { "#$it" }
+                                    // Fila meta: tipografía un punto más grande
+                                    // (labelSmall queda chica); el toggle
+                                    // onQueryChange queda intacto.
+                                    Row {
+                                        Text(
+                                            formatModifiedMs(note.modifiedMs),
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontSize = 13.sp
+                                            )
+                                        )
+                                        note.tags.forEach { tag ->
+                                            Text(
+                                                "#$tag",
+                                                style = MaterialTheme.typography.labelSmall.copy(
+                                                    fontSize = 13.sp
+                                                ),
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier
+                                                    .padding(start = 6.dp)
+                                                    .clickable {
+                                                        val wanted = "#$tag"
+                                                        onQueryChange(if (query == wanted) "" else wanted)
+                                                    }
+                                            )
+                                        }
                                     }
-                                    Text(
-                                        meta,
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
                                 }
                             }
                         }
