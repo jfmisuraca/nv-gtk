@@ -10,8 +10,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -226,19 +228,31 @@ fun NotesListScreen(
                                         )
                                     }
                                     // Parity slice 1 (T2): SOLO fecha/hora de
-                                    // modificación (+ tags), mismo formato
-                                    // canónico que desktop.
+                                    // modificación (+ tags clickeables que
+                                    // filtran vía onQueryChange, con toggle),
+                                    // mismo formato canónico que desktop. El
+                                    // LaunchedEffect(query) + refresh() + Clear
+                                    // X existentes hacen el resto.
                                     Spacer(Modifier.height(4.dp))
-                                    val meta = if (note.tags.isEmpty()) {
-                                        formatModifiedMs(note.modifiedMs)
-                                    } else {
-                                        formatModifiedMs(note.modifiedMs) + " • " +
-                                            note.tags.joinToString(" ") { "#$it" }
+                                    Row {
+                                        Text(
+                                            formatModifiedMs(note.modifiedMs),
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                        note.tags.forEach { tag ->
+                                            Text(
+                                                "#$tag",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier
+                                                    .padding(start = 6.dp)
+                                                    .clickable {
+                                                        val wanted = "#$tag"
+                                                        onQueryChange(if (query == wanted) "" else wanted)
+                                                    }
+                                            )
+                                        }
                                     }
-                                    Text(
-                                        meta,
-                                        style = MaterialTheme.typography.labelSmall
-                                    )
                                 }
                             }
                         }
