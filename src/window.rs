@@ -14,7 +14,7 @@ use libadwaita::prelude::*;
 use libadwaita::{Application, ApplicationWindow};
 
 use crate::app_state::AppState;
-use crate::palettes::ThemeId;
+use crate::palettes::{ThemeId, Variant, palette};
 use crate::theme;
 use crate::wiki_autocomplete::{WikiAutocomplete, wiki_link_accent};
 use nv_core::config::Config;
@@ -43,14 +43,31 @@ enum MdStyle {
     Italic,
     Code,
     Link,
+    WikiLink,
 }
 
 /// Tramo de texto con sus estilos activos. El texto ya viene segmentado por
 /// bloque (los `\n` de separación son spans propios sin estilo).
+/// `link_url` guarda el destino http(s) del markdown-link que originó el
+/// tramo (texto + sufijo ` (url)`); `wiki_target` guarda el texto dentro de
+/// `[[...]]`. Ambos son `None` en texto normal: solo los usa la preview
+/// para el hover/click, los tests miran `text`/`styles` como siempre.
 #[derive(Clone, PartialEq, Eq, Debug)]
 struct RichSpan {
     text: String,
     styles: Vec<MdStyle>,
+    link_url: Option<String>,
+    wiki_target: Option<String>,
+}
+
+/// Rango clickeable de la preview ya renderizada (offsets en caracteres
+/// sobre el buffer). Exactamente uno de `url`/`wiki` es `Some`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct PreviewLink {
+    start: i32,
+    end: i32,
+    url: Option<String>,
+    wiki: Option<String>,
 }
 
 fn md_tag_name(style: MdStyle) -> &'static str {
@@ -62,7 +79,21 @@ fn md_tag_name(style: MdStyle) -> &'static str {
         MdStyle::Italic => "md-italic",
         MdStyle::Code => "md-code",
         MdStyle::Link => "md-link",
+        MdStyle::WikiLink => "md-wikilink",
     }
+}
+
+/// Fondo sutil para el código inline/bloque de la preview: el slot
+/// `surface0` de la paleta activa para (`theme`, `dark`), el mismo patrón
+/// que [`wiki_link_accent`](crate::wiki_autocomplete::wiki_link_accent)
+/// (que aporta el `mauve` para headings/links). Pura, sin GTK.
+///
+/// `surface0` queda por encima de `base` en claro y oscuro con contraste
+/// suficiente para texto normal encima (es el escalón de elevación que el
+/// propio stylesheet usa para superficies).
+fn preview_code_background(theme: ThemeId, dark: bool) -> String {
+    let variant = if dark { Variant::Dark } else { Variant::Light };
+    palette(theme, variant).surface0.into_owned()
 }
 
 /// Parsea markdown (CommonMark vía `pulldown-cmark`) a tramos con estilo.
@@ -78,11 +109,14 @@ fn markdown_spans(text: &str) -> Vec<RichSpan> {
     // Destinos de links/imágenes pendientes (uno por Start anidado).
     let mut link_dests: Vec<String> = Vec::new();
 
-    let mut push = |spans: &mut Vec<RichSpan>, s: &str, styles: &[MdStyle]| {
+    // El link vigente es el destino del Start más interno todavía abierto.
+    let push = |spans: &mut Vec<RichSpan>, s: &str, styles: &[MdStyle], link: Option<&str>| {
         if !s.is_empty() {
             spans.push(RichSpan {
                 text: s.to_string(),
                 styles: styles.to_vec(),
+                link_url: link.map(|l| l.to_string()),
+                wiki_target: None,
             });
         }
     };
@@ -115,7 +149,7 @@ fn markdown_spans(text: &str) -> Vec<RichSpan> {
                         }
                         _ => "• ".to_string(),
                     };
-                    push(&mut spans, &format!("{indent}{bullet}"), &styles);
+                    push(&mut spans, &format!("{indent}{bullet}"), &styles, None);
                 }
                 Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. } => {
                     styles.push(MdStyle::Link);
@@ -126,40 +160,44 @@ fn markdown_spans(text: &str) -> Vec<RichSpan> {
             Event::End(tag) => match tag {
                 TagEnd::Heading(_) => {
                     styles.retain(|s| !matches!(s, MdStyle::H1 | MdStyle::H2 | MdStyle::H3));
-                    push(&mut spans, "\n\n", &[]);
+                    push(&mut spans, "\n\n", &[], None);
                 }
-                TagEnd::Paragraph => push(&mut spans, "\n\n", &[]),
+                TagEnd::Paragraph => push(&mut spans, "\n\n", &[], None),
                 TagEnd::CodeBlock => {
                     styles.retain(|s| *s != MdStyle::Code);
-                    push(&mut spans, "\n", &[]);
+                    push(&mut spans, "\n", &[], None);
                 }
-                TagEnd::Item => push(&mut spans, "\n", &[]),
+                TagEnd::Item => push(&mut spans, "\n", &[], None),
                 TagEnd::List(_) => {
                     lists.pop();
-                    push(&mut spans, "\n", &[]);
+                    push(&mut spans, "\n", &[], None);
                 }
                 TagEnd::Link | TagEnd::Image => {
                     styles.retain(|s| *s != MdStyle::Link);
                     if let Some(dest) = link_dests.pop() {
-                        push(&mut spans, &format!(" ({dest})"), &[MdStyle::Link]);
+                        push(&mut spans, &format!(" ({dest})"), &[MdStyle::Link], Some(&dest));
                     }
                 }
-                TagEnd::BlockQuote(_) => push(&mut spans, "\n\n", &[]),
-                TagEnd::Table => push(&mut spans, "\n", &[]),
-                TagEnd::TableHead | TagEnd::TableRow => push(&mut spans, "\n", &[]),
-                TagEnd::TableCell => push(&mut spans, " | ", &[]),
+                TagEnd::BlockQuote(_) => push(&mut spans, "\n\n", &[], None),
+                TagEnd::Table => push(&mut spans, "\n", &[], None),
+                TagEnd::TableHead | TagEnd::TableRow => push(&mut spans, "\n", &[], None),
+                TagEnd::TableCell => push(&mut spans, " | ", &[], None),
                 _ => {}
             },
-            Event::Text(t) => push(&mut spans, &t, &styles),
+            Event::Text(t) => {
+                let link = link_dests.last().map(|s| s.as_str());
+                push(&mut spans, &t, &styles, link);
+            }
             Event::Code(c) => {
                 let mut with_code = styles.clone();
                 if !with_code.contains(&MdStyle::Code) {
                     with_code.push(MdStyle::Code);
                 }
-                push(&mut spans, &c, &with_code);
+                let link = link_dests.last().map(|s| s.as_str());
+                push(&mut spans, &c, &with_code, link);
             }
-            Event::SoftBreak | Event::HardBreak => push(&mut spans, "\n", &[]),
-            Event::Rule => push(&mut spans, "───\n\n", &[]),
+            Event::SoftBreak | Event::HardBreak => push(&mut spans, "\n", &[], None),
+            Event::Rule => push(&mut spans, "───\n\n", &[], None),
             Event::Html(_) | Event::InlineHtml(_) | Event::FootnoteReference(_) => {}
             Event::TaskListMarker(_) => {}
             // Eventos de metadata/tablas que no aportan texto visible.
@@ -177,17 +215,116 @@ fn markdown_spans(text: &str) -> Vec<RichSpan> {
             break;
         }
     }
-    spans
+    expand_wiki_spans(coalesce_spans(spans))
 }
 
-/// Crea los TextTags de preview en el buffer si aún no existen. Sin colores
-/// fijos: peso/escala/monospace/subrayado heredan el foreground del tema.
-fn ensure_preview_tags(buffer: &gtk4::TextBuffer) {
-    use gtk4::pango;
-    if buffer.tag_table().lookup(md_tag_name(MdStyle::H1)).is_some() {
-        return;
+/// Une tramos adyacentes con idénticos estilos y destino: `pulldown-cmark`
+/// 0.12 emite `[` y `]` como eventos de texto separados (son potenciales
+/// corchetes de link), así que `[[destino]]` nunca llega en un solo tramo.
+/// La fusión es neutra para el render (mismos tags aplicados al texto
+/// concatenado) y deja a `expand_wiki_spans` ver el `[[...]]` completo.
+/// Pura — testeable sin display.
+fn coalesce_spans(spans: Vec<RichSpan>) -> Vec<RichSpan> {
+    let mut out: Vec<RichSpan> = Vec::with_capacity(spans.len());
+    for span in spans {
+        let mergeable = match out.last() {
+            Some(last) => {
+                last.styles == span.styles
+                    && last.link_url == span.link_url
+                    && last.wiki_target.is_none()
+                    && span.wiki_target.is_none()
+            }
+            None => false,
+        };
+        if mergeable {
+            out.last_mut().expect("coalesce: last checked").text.push_str(&span.text);
+        } else {
+            out.push(span);
+        }
     }
+    out
+}
+
+/// Parte los tramos que contienen `[[destino]]` en sub-tramos con estilo
+/// `WikiLink` (mismo look que los markdown-links) y `wiki_target` con el
+/// texto interior. `pulldown-cmark` no entiende la sintaxis wiki, así que
+/// llega como texto literal: se detecta acá para que la preview la resalte
+/// y la haga clickeable igual que el editor.
+///
+/// No toca tramos que ya son markdown-links (evita anidar destinos) ni
+/// vacía el destino (`[[]]` queda como texto). Pura — testeable sin display.
+fn expand_wiki_spans(spans: Vec<RichSpan>) -> Vec<RichSpan> {
+    let mut out: Vec<RichSpan> = Vec::with_capacity(spans.len());
+    for span in spans {
+        if span.styles.contains(&MdStyle::Link) || !span.text.contains("[[") {
+            out.push(span);
+            continue;
+        }
+        let text = span.text.clone();
+        let mut cursor = 0;
+        let mut emitted = false;
+        while let Some(rel_open) = text[cursor..].find("[[") {
+            let open = cursor + rel_open;
+            let after_open = open + 2;
+            let Some(rel_close) = text[after_open..].find("]]") else {
+                break;
+            };
+            let close = after_open + rel_close;
+            let target = text[after_open..close].trim();
+            if target.is_empty() || target.contains('\n') {
+                cursor = after_open;
+                continue;
+            }
+            if open > cursor {
+                out.push(RichSpan {
+                    text: text[cursor..open].to_string(),
+                    styles: span.styles.clone(),
+                    link_url: span.link_url.clone(),
+                    wiki_target: None,
+                });
+            }
+            let mut wiki_styles = span.styles.clone();
+            if !wiki_styles.contains(&MdStyle::WikiLink) {
+                wiki_styles.push(MdStyle::WikiLink);
+            }
+            out.push(RichSpan {
+                text: text[open..close + 2].to_string(),
+                styles: wiki_styles,
+                link_url: None,
+                wiki_target: Some(target.to_string()),
+            });
+            cursor = close + 2;
+            emitted = true;
+        }
+        if !emitted {
+            out.push(span);
+        } else if cursor < text.len() {
+            out.push(RichSpan {
+                text: text[cursor..].to_string(),
+                styles: span.styles.clone(),
+                link_url: span.link_url.clone(),
+                wiki_target: None,
+            });
+        }
+    }
+    out
+}
+
+/// Crea (o actualiza) los TextTags de preview del buffer. Idempotente:
+/// cada llamada deja peso/escala/monospace/subrayado más los colores de la
+/// paleta activa — headings y links en el acento `mauve` (mismo slot que
+/// `wiki_link_accent`), código con fondo `surface0` (ver
+/// `preview_code_background`). Sin hex hardcodeado: `accent` y `code_bg`
+/// siempre vienen de la paleta vigente.
+///
+/// Llamar en cada render y en cada cambio de tema: actualizar la propiedad
+/// del tag repinta los rangos ya aplicados sin tocar el texto.
+fn ensure_preview_tags(buffer: &gtk4::TextBuffer, accent: &str, code_bg: &str) {
+    use gtk4::pango;
     let tag = |name: &str| {
+        if let Some(existing) = buffer.tag_table().lookup(name) {
+            return existing;
+        }
         let t = gtk4::TextTag::new(Some(name));
         buffer.tag_table().add(&t);
         t
@@ -195,32 +332,59 @@ fn ensure_preview_tags(buffer: &gtk4::TextBuffer) {
     let h1 = tag(md_tag_name(MdStyle::H1));
     h1.set_scale(1.5);
     h1.set_weight(700);
+    h1.set_foreground(Some(accent));
     let h2 = tag(md_tag_name(MdStyle::H2));
     h2.set_scale(1.3);
     h2.set_weight(700);
+    h2.set_foreground(Some(accent));
     let h3 = tag(md_tag_name(MdStyle::H3));
     h3.set_scale(1.15);
     h3.set_weight(700);
+    h3.set_foreground(Some(accent));
     let bold = tag(md_tag_name(MdStyle::Bold));
     bold.set_weight(700);
     let italic = tag(md_tag_name(MdStyle::Italic));
     italic.set_style(pango::Style::Italic);
     let code = tag(md_tag_name(MdStyle::Code));
     code.set_family(Some("monospace"));
+    code.set_background(Some(code_bg));
     let link = tag(md_tag_name(MdStyle::Link));
     link.set_underline(pango::Underline::Single);
+    link.set_foreground(Some(accent));
+    let wiki = tag(md_tag_name(MdStyle::WikiLink));
+    wiki.set_underline(pango::Underline::Single);
+    wiki.set_foreground(Some(accent));
 }
 
-/// Renderiza markdown al buffer de preview (reemplazo total). El buffer del
-/// editor no se toca: el contenido y el cursor se preservan solos.
-fn render_markdown_to_buffer(text: &str, buffer: &gtk4::TextBuffer) {
-    ensure_preview_tags(buffer);
+/// Renderiza markdown al buffer de preview (reemplazo total) y devuelve los
+/// rangos clickeables (offsets en caracteres). El buffer del editor no se
+/// toca: el contenido y el cursor se preservan solos.
+fn render_markdown_to_buffer(
+    text: &str,
+    buffer: &gtk4::TextBuffer,
+    accent: &str,
+    code_bg: &str,
+) -> Vec<PreviewLink> {
+    ensure_preview_tags(buffer, accent, code_bg);
     buffer.set_text("");
+    let mut links = Vec::new();
+    let mut offset: i32 = 0;
     for span in markdown_spans(text) {
         let names: Vec<&str> = span.styles.iter().map(|s| md_tag_name(*s)).collect();
         let mut end = buffer.end_iter();
         buffer.insert_with_tags_by_name(&mut end, &span.text, &names);
+        let len = span.text.chars().count() as i32;
+        if span.link_url.is_some() || span.wiki_target.is_some() {
+            links.push(PreviewLink {
+                start: offset,
+                end: offset + len,
+                url: span.link_url.clone(),
+                wiki: span.wiki_target.clone(),
+            });
+        }
+        offset += len;
     }
+    links
 }
 
 /// Handles a los widgets clave de la UI. Los expone `build_ui` para poder
@@ -533,6 +697,23 @@ fn os_prefers_dark(display: Option<&gdk::Display>) -> bool {
         .unwrap_or(true)
 }
 
+/// Solo `http://` y `https://` abren navegador desde la preview. Otros
+/// esquemas (o `None`) se ignoran: nada que ejecutar, nada que romper.
+/// Pura — testeable sin display.
+fn is_http_url(url: Option<&str>) -> bool {
+    matches!(url, Some(u) if u.starts_with("http://") || u.starts_with("https://"))
+}
+
+/// Abre una URL en el navegador predeterminado vía
+/// `gio::AppInfo::launch_default_for_uri` (el estándar freedesktop, sin
+/// ventana padre necesaria: la preview no tiene diálogo propio). Los
+/// errores se ignoran a propósito: un click en un link roto no debe
+/// voltear la app.
+fn open_url_external(url: &str, parent: &TextView) {
+    let context = parent.display().app_launch_context();
+    let _ = gtk4::gio::AppInfo::launch_default_for_uri(url, Some(&context));
+}
+
 pub fn build_ui(app: &Application) -> UiHandles {
     let config = Config::load();
     // Aplica el tema guardado antes de construir la ventana para que cada
@@ -718,6 +899,10 @@ pub fn build_ui(app: &Application) -> UiHandles {
     // El resaltado [[...]] vive en WikiAutocomplete, que se crea más abajo:
     // este holder puentea el selector de tema con el setter de acento.
     let wiki_holder: Rc<RefCell<Option<WikiAutocomplete>>> = Rc::new(RefCell::new(None));
+    // Lo mismo para la preview: el selector recalcula sus colores y
+    // re-renderiza si está visible. Se rellena tras definir `render_preview`.
+    let preview_theme_refresh: Rc<RefCell<Option<Rc<dyn Fn()>>>> =
+        Rc::new(RefCell::new(None));
 
     const THEME_ORDER: [ThemeId; 4] = [
         ThemeId::Catppuccin,
@@ -738,6 +923,7 @@ pub fn build_ui(app: &Application) -> UiHandles {
         let state_c = state.clone();
         let theme_button_c = theme_button.clone();
         let wiki_holder_c = wiki_holder.clone();
+        let preview_theme_refresh_c = preview_theme_refresh.clone();
         item.connect_toggled(move |button| {
             if !button.is_active() {
                 return;
@@ -753,6 +939,11 @@ pub fn build_ui(app: &Application) -> UiHandles {
             }
             state_c.borrow_mut().config.theme = id.as_str().to_string();
             state_c.borrow().config.save();
+            // La preview resuelve sus colores desde el estado ya actualizado
+            // y re-renderiza solo si está visible (ver `render_preview`).
+            if let Some(ref refresh) = *preview_theme_refresh_c.borrow() {
+                refresh();
+            }
             theme_button_c.set_label(id.display_name());
         });
         theme_list.append(&item);
@@ -1229,20 +1420,136 @@ pub fn build_ui(app: &Application) -> UiHandles {
         }
     };
 
+    // Rangos clickeables de la última renderización de preview
+    // (URLs http(s) + [[wiki-links]]). Los actualiza `render_preview` y los
+    // leen el hover/click de `preview_view`. Solo vive en la preview.
+    let preview_links: Rc<RefCell<Vec<PreviewLink>>> = Rc::new(RefCell::new(Vec::new()));
+
     // Renderiza el texto ACTUAL del buffer del editor en la vista previa.
     // No toca el buffer del editor: contenido y cursor se preservan solos.
+    // Los colores se resuelven acá desde la paleta activa (mauve para
+    // headings/links, surface0 de fondo para código), así que un cambio de
+    // tema queda aplicado con solo re-renderizar.
     let render_preview = {
         let text_view = text_view.clone();
         let preview_view = preview_view.clone();
+        let preview_links = Rc::clone(&preview_links);
+        let state = Rc::clone(&state);
 
         move || {
             let buffer = text_view.buffer();
             let (start, end) = buffer.bounds();
             let text = buffer.text(&start, &end, true).to_string();
             drop(buffer);
-            render_markdown_to_buffer(&text, &preview_view.buffer());
+            let theme = ThemeId::from_persisted(&state.borrow().config.theme);
+            let dark = os_prefers_dark(gdk::Display::default().as_ref());
+            let accent = wiki_link_accent(theme, dark);
+            let code_bg = preview_code_background(theme, dark);
+            let links =
+                render_markdown_to_buffer(&text, &preview_view.buffer(), &accent, &code_bg);
+            *preview_links.borrow_mut() = links;
         }
     };
+
+    // Aplica la paleta vigente a los tags ya creados y re-renderiza si la
+    // preview está visible. Lo invoca el selector de tema (vía holder,
+    // porque se define después del loop del picker).
+    *preview_theme_refresh.borrow_mut() = Some(Rc::new({
+        let preview_view = preview_view.clone();
+        let preview_shown = Rc::clone(&preview_shown);
+        let render_preview = render_preview.clone();
+        let state = Rc::clone(&state);
+        move || {
+            let theme = ThemeId::from_persisted(&state.borrow().config.theme);
+            let dark = os_prefers_dark(gdk::Display::default().as_ref());
+            ensure_preview_tags(
+                &preview_view.buffer(),
+                &wiki_link_accent(theme, dark),
+                &preview_code_background(theme, dark),
+            );
+            if preview_shown.get() {
+                render_preview();
+            }
+        }
+    }));
+
+    // Links clickeables solo en la preview (el editor no se toca):
+    // - http(s): manito + tooltip con la URL + click abre el navegador.
+    // - [[wiki]]: mismo gesto que en el editor (filtra por el destino vía
+    //   `search_wiki_target`, igual que Ctrl+Enter sobre el editor).
+    {
+        let motion_view = preview_view.clone();
+        let motion_links = Rc::clone(&preview_links);
+        let motion = gtk4::EventControllerMotion::new();
+        motion.connect_motion(move |_, x, y| {
+            let found = motion_view
+                .iter_at_position(x as i32, y as i32)
+                .and_then(|(iter, _)| {
+                    let offset = iter.offset();
+                    motion_links
+                        .borrow()
+                        .iter()
+                        .find(|l| offset >= l.start && offset < l.end)
+                        .cloned()
+                });
+            match found {
+                Some(link) if is_http_url(link.url.as_deref()) => {
+                    let cursor = gdk::Cursor::from_name("pointer", None);
+                    motion_view.set_cursor(cursor.as_ref());
+                    motion_view.set_tooltip_text(link.url.as_deref());
+                }
+                Some(link) if link.wiki.is_some() => {
+                    let cursor = gdk::Cursor::from_name("pointer", None);
+                    motion_view.set_cursor(cursor.as_ref());
+                    motion_view.set_tooltip_text(link.wiki.as_deref());
+                }
+                _ => {
+                    motion_view.set_cursor(None::<&gdk::Cursor>);
+                    motion_view.set_tooltip_text(None);
+                }
+            }
+        });
+        motion.connect_leave({
+            let motion_view = preview_view.clone();
+            move |_| {
+                motion_view.set_cursor(None::<&gdk::Cursor>);
+                motion_view.set_tooltip_text(None);
+            }
+        });
+        preview_view.add_controller(motion);
+
+        let click_view = preview_view.clone();
+        let click_links = Rc::clone(&preview_links);
+        let search_wiki_target_c = search_wiki_target.clone();
+        let click = gtk4::GestureClick::new();
+        click.set_button(gdk::BUTTON_PRIMARY);
+        click.connect_pressed(move |_, n_press, x, y| {
+            if n_press != 1 {
+                return;
+            }
+            let Some((iter, _)) = click_view.iter_at_position(x as i32, y as i32) else {
+                return;
+            };
+            let offset = iter.offset();
+            let found = click_links
+                .borrow()
+                .iter()
+                .find(|l| offset >= l.start && offset < l.end)
+                .cloned();
+            match found {
+                Some(link) if is_http_url(link.url.as_deref()) => {
+                    open_url_external(link.url.as_deref().unwrap_or_default(), &click_view);
+                }
+                Some(link) => {
+                    if let Some(target) = link.wiki.as_deref() {
+                        search_wiki_target_c(target);
+                    }
+                }
+                None => {}
+            }
+        });
+        preview_view.add_controller(click);
+    }
 
     // Toggle edición/preview (Ctrl+E). Entrar renderiza el texto actual;
     // salir vuelve al editor con foco. El sticky title no se toca: sigue
@@ -2111,6 +2418,92 @@ mod tests {
         assert!(style_of("uno").contains(&MdStyle::H1));
         assert!(style_of("dos").contains(&MdStyle::H2));
         assert!(style_of("tres").contains(&MdStyle::H3));
+    }
+
+    #[test]
+    fn markdown_spans_propagates_link_url_to_text_and_suffix() {
+        let spans = markdown_spans("[enlace](https://ejemplo.com)\n");
+        let linked: Vec<_> = spans.iter().filter(|s| s.link_url.is_some()).collect();
+        assert!(
+            !linked.is_empty(),
+            "tramos con destino: {spans:?}"
+        );
+        for s in &linked {
+            assert_eq!(s.link_url.as_deref(), Some("https://ejemplo.com"));
+            assert!(s.styles.contains(&MdStyle::Link));
+        }
+        // Etiqueta y URL visible quedan cubiertas por el destino (pueden
+        // llegar fusionadas en un solo tramo: mismos tags, mismo link).
+        assert!(
+            linked.iter().any(|s| s.text.contains("enlace")),
+            "etiqueta: {spans:?}"
+        );
+        assert!(
+            spans
+                .iter()
+                .any(|s| s.text.contains("https://ejemplo.com")),
+            "url visible: {spans:?}"
+        );
+    }
+
+    #[test]
+    fn markdown_spans_splits_wiki_links_with_target() {
+        let spans = markdown_spans("ver [[mi nota]] y seguir\n");
+        let wiki = spans
+            .iter()
+            .find(|s| s.text == "[[mi nota]]")
+            .unwrap_or_else(|| panic!("wiki-link partido: {spans:?}"));
+        assert!(wiki.styles.contains(&MdStyle::WikiLink));
+        assert_eq!(wiki.wiki_target.as_deref(), Some("mi nota"));
+        // El texto alrededor se conserva como tramos propios sin destino.
+        assert!(spans.iter().any(|s| s.text.contains("ver ")));
+        assert!(spans.iter().any(|s| s.text.contains(" y seguir")));
+    }
+
+    #[test]
+    fn markdown_spans_ignores_unclosed_or_empty_wiki() {
+        for raw in ["[[sin cerrar\n", "[[]]\n", "[[  ]]\n"] {
+            let spans = markdown_spans(raw);
+            assert!(
+                spans.iter().all(|s| s.wiki_target.is_none()),
+                "sin destino wiki en {raw:?}: {spans:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn preview_code_background_matches_surface0_slot() {
+        for theme in [
+            ThemeId::Catppuccin,
+            ThemeId::Dracula,
+            ThemeId::Flexoki,
+            ThemeId::Wallpaper,
+        ] {
+            for dark in [false, true] {
+                let variant = if dark { Variant::Dark } else { Variant::Light };
+                assert_eq!(
+                    preview_code_background(theme, dark),
+                    palette(theme, variant).surface0.into_owned(),
+                    "{theme:?} dark={dark}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn only_http_urls_open_externally() {
+        assert!(is_http_url(Some("http://ejemplo.com")));
+        assert!(is_http_url(Some("https://ejemplo.com/x")));
+        for bad in [
+            None,
+            Some(""),
+            Some("ftp://ejemplo.com"),
+            Some("file:///tmp/x"),
+            Some("javascript:alert(1)"),
+            Some("ejemplo.com"),
+        ] {
+            assert!(!is_http_url(bad), "no debe abrir: {bad:?}");
+        }
     }
 
     // Requiere display: `xvfb-run -a cargo test -- --test-threads=1`
