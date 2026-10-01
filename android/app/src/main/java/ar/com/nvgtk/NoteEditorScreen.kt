@@ -39,8 +39,10 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -116,6 +118,9 @@ fun NoteEditorScreen(
     var editingTitle by remember { mutableStateOf(false) }
     var titleText by remember(note.id) { mutableStateOf(note.title) }
     var savedText by remember(note.id) { mutableStateOf(note.content) }
+    // Preview por nota (clave note.id como el campo): alterna edición con
+    // la columna de solo lectura renderizada. Se resetea al cambiar de nota.
+    var preview by remember(note.id) { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
 
@@ -325,6 +330,22 @@ fun NoteEditorScreen(
                     }
                 },
                 actions = {
+                    // Toggle preview: material-icons-core (~60 iconos) no trae
+                    // ojo/visibility/article; List (vista renderizada) y Edit
+                    // (volver a editar) son lo mejor disponible del AAR.
+                    IconButton(onClick = { preview = !preview }) {
+                        if (preview) {
+                            Icon(
+                                Icons.Filled.Edit,
+                                contentDescription = stringResource(R.string.edit_action)
+                            )
+                        } else {
+                            Icon(
+                                Icons.AutoMirrored.Filled.List,
+                                contentDescription = stringResource(R.string.preview_action)
+                            )
+                        }
+                    }
                     IconButton(onClick = { deleteAndClose() }) {
                         Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete_note))
                     }
@@ -365,7 +386,9 @@ fun NoteEditorScreen(
                 // Opens the existing note or creates it (desktop flow).
                 // T6: full-width 48dp touch target (Material minimum) so the
                 // chip is comfortable to tap; text stays start-aligned.
-                AnimatedVisibility(visible = activeLink != null) {
+                // En preview se oculta el chrome de edición (follow-chip y
+                // autocomplete): la columna es de solo lectura.
+                AnimatedVisibility(visible = !preview && activeLink != null) {
                     val link = activeLink
                     if (link != null) {
                         Box(
@@ -387,7 +410,7 @@ fun NoteEditorScreen(
                 // T8: hidden while a closed `[[link]]` is under the cursor —
                 // the follow-chip above owns that state (desktop parity:
                 // closed link navigates, only an open trigger autocompletes).
-                AnimatedVisibility(visible = shouldShowWikiAutocomplete(openQuery, activeLink != null)) {
+                AnimatedVisibility(visible = !preview && shouldShowWikiAutocomplete(openQuery, activeLink != null)) {
                     ElevatedCard(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -436,16 +459,25 @@ fun NoteEditorScreen(
                         }
                     }
                 }
-                OutlinedTextField(
-                    state = textFieldState,
-                    outputTransformation = wikiHighlightTransformation,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .focusRequester(focusRequester)
-                        .semantics { contentDescription = editorFieldLabel },
-                    placeholder = { Text(stringResource(R.string.editor_placeholder)) }
-                )
+                if (preview) {
+                    MarkdownPreview(
+                        text = textFieldState.text.toString(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                    )
+                } else {
+                    OutlinedTextField(
+                        state = textFieldState,
+                        outputTransformation = wikiHighlightTransformation,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .focusRequester(focusRequester)
+                            .semantics { contentDescription = editorFieldLabel },
+                        placeholder = { Text(stringResource(R.string.editor_placeholder)) }
+                    )
+                }
                 // Parity slice 1 (T4): contador palabras/caracteres, paridad
                 // con el footer de desktop (`window.rs`: split_whitespace +
                 // chars count, "%d palabras | %d caracteres"). Lee el texto
