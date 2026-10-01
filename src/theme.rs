@@ -100,6 +100,7 @@ const LIGHT_BLOCK: &str = r#"
     @define-color accent_bg_color @mauve;
     @define-color accent_fg_color @base;
     @define-color accent_color @mauve;
+    @define-color tag_fg_color %%TAG_FG%%;
     @define-color destructive_bg_color @red;
     @define-color destructive_fg_color @base;
     @define-color error_color @red;
@@ -189,6 +190,7 @@ const DARK_BLOCK: &str = r#"
     @define-color accent_bg_color @mauve;
     @define-color accent_fg_color @base;
     @define-color accent_color @mauve;
+    @define-color tag_fg_color %%TAG_FG%%;
     @define-color destructive_bg_color @red;
     @define-color destructive_fg_color @base;
     @define-color error_color @red;
@@ -217,12 +219,53 @@ const DARK_BLOCK: &str = r#"
 /// stays green without new `@define-color` entries.
 const COMMON_BLOCK: &str = r#"
 .nv-tag {
-    color: @accent_fg_color;
+    color: @tag_fg_color;
     background-color: @accent_bg_color;
     border-radius: 4px;
     padding: 1px 6px;
 }
 "#;
+
+/// Relative luminance of a `#rrggbb` hex color (WCAG definition).
+fn luminance(hex: &str) -> f64 {
+    let channel = |i: usize| {
+        let v = u8::from_str_radix(&hex[i..i + 2], 16).unwrap_or(0) as f64 / 255.0;
+        if v <= 0.03928 {
+            v / 12.92
+        } else {
+            ((v + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+}
+
+/// WCAG contrast ratio between two `#rrggbb` hex colors.
+fn contrast_ratio(a: &str, b: &str) -> f64 {
+    let (hi, lo) = {
+        let (x, y) = (luminance(a), luminance(b));
+        if x >= y {
+            (x, y)
+        } else {
+            (y, x)
+        }
+    };
+    (hi + 0.05) / (lo + 0.05)
+}
+
+/// Foreground for the solid tag pill: whichever of the palette's `base` or
+/// `text` contrasts best against its `mauve` highlight. A fixed choice fails
+/// somewhere (Flexoki dark's base only reaches 2.46:1 against its mauve);
+/// the computed pick keeps every theme × variant above AA, including any
+/// wallpaper-derived palette.
+pub(crate) fn tag_fg(palette: &Palette) -> &str {
+    if contrast_ratio(&palette.mauve, &palette.text)
+        > contrast_ratio(&palette.mauve, &palette.base)
+    {
+        palette.text.as_ref()
+    } else {
+        palette.base.as_ref()
+    }
+}
 
 /// Replaces the `%%NAME%%` tokens in `template` with `palette`'s hex values.
 fn render_block(template: &str, palette: &Palette) -> String {
@@ -250,6 +293,7 @@ fn render_block(template: &str, palette: &Palette) -> String {
         ("%%SKY%%", palette.sky.as_ref()),
         ("%%PINK%%", palette.pink.as_ref()),
         ("%%PEACH%%", palette.peach.as_ref()),
+        ("%%TAG_FG%%", tag_fg(palette)),
     ] {
         css = css.replace(token, value);
     }
@@ -393,13 +437,36 @@ mod tests {
                 "{}: template token left unsubstituted",
                 theme.as_str()
             );
-            // 22 palette entries + 39 libadwaita/legacy variables per variant.
+            // 22 palette entries + 40 libadwaita/legacy variables per variant.
             assert_eq!(
                 css.matches("@define-color").count(),
-                2 * 61,
+                2 * 62,
                 "{}: unexpected named-color count",
                 theme.as_str()
             );
+        }
+    }
+
+    #[test]
+    fn tag_pill_foreground_stays_above_aa_in_every_theme() {
+        use palettes::Variant;
+        for theme in ALL_THEMES {
+            // Wallpaper without pywal falls back to Catppuccin, covered by
+            // its own case; the computed pick also adapts to any injected
+            // pywal palette at runtime.
+            if theme == ThemeId::Wallpaper {
+                continue;
+            }
+            for variant in [Variant::Light, Variant::Dark] {
+                let palette = palettes::palette(theme, variant);
+                let ratio = contrast_ratio(&palette.mauve, tag_fg(&palette));
+                assert!(
+                    ratio >= 4.5,
+                    "{:?}/{:?}: tag contrast {ratio:.2} below AA",
+                    theme,
+                    variant
+                );
+            }
         }
     }
 
