@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ElevatedCard
@@ -77,6 +78,7 @@ fun NotesListScreen(
     query: String,
     error: String?,
     onOpen: (String) -> Unit,
+    onRandom: () -> Unit,
     onQueryChange: (String) -> Unit,
     onTrash: () -> Unit,
     onSettings: () -> Unit,
@@ -94,6 +96,11 @@ fun NotesListScreen(
                     }
                     IconButton(onClick = onTrash) {
                         Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.trash_action))
+                    }
+                    // Random note: opens the editor on a random note from
+                    // the current list (filtered or full). No-op when empty.
+                    IconButton(onClick = onRandom) {
+                        Icon(Icons.Filled.Refresh, contentDescription = stringResource(R.string.random_note))
                     }
                 }
             )
