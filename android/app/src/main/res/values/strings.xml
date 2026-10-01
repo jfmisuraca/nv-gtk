@@ -14,6 +14,7 @@
     <!-- Notes list screen -->
     <string name="list_title">Notas</string>
     <string name="trash_action">Papelera</string>
+    <string name="random_note">Nota aleatoria</string>
     <string name="new_note">Nueva nota</string>
     <string name="search_placeholder">Buscar…</string>
     <string name="search_field_label">Buscar notas</string>
