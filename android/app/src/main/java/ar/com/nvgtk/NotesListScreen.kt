@@ -13,6 +13,9 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.FlowRowOverflow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -52,6 +55,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.Instant
@@ -70,7 +74,7 @@ private val modifiedFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 internal fun formatModifiedMs(modifiedMs: Long): String =
     Instant.ofEpochMilli(modifiedMs).atZone(ZoneId.systemDefault()).format(modifiedFormatter)
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun NotesListScreen(
     notes: List<NoteSnapshot>,
@@ -229,10 +233,16 @@ fun NotesListScreen(
                             ) {
                                 Column(Modifier.padding(20.dp)) {
                                     Text(
-                                        displayTitle(note.content, emptyTitle),
+                                        cardTitle(
+                                            note.content,
+                                            note.title.ifEmpty { note.id },
+                                            emptyTitle
+                                        ),
                                         style = MaterialTheme.typography.titleMedium.copy(
                                             fontSize = 18.sp
-                                        )
+                                        ),
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     // Preview starts at the SECOND non-blank line
                                     // so it never repeats the title; hidden when
@@ -258,27 +268,37 @@ fun NotesListScreen(
                                     // Fila meta: tipografía un punto más grande
                                     // (labelSmall queda chica); el toggle
                                     // onQueryChange queda intacto.
-                                    Row {
+                                    // Fila meta: UNA sola línea de etiquetas (el
+                                    // FlowRow recorta lo que no entra; el tap
+                                    // por tag con toggle queda intacto).
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
                                             formatModifiedMs(note.modifiedMs),
                                             style = MaterialTheme.typography.labelSmall.copy(
                                                 fontSize = 13.sp
                                             )
                                         )
-                                        note.tags.forEach { tag ->
-                                            Text(
-                                                "#$tag",
-                                                style = MaterialTheme.typography.labelSmall.copy(
-                                                    fontSize = 13.sp
-                                                ),
-                                                color = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier
-                                                    .padding(start = 6.dp)
-                                                    .clickable {
-                                                        val wanted = "#$tag"
-                                                        onQueryChange(if (query == wanted) "" else wanted)
-                                                    }
-                                            )
+                                        FlowRow(
+                                            maxLines = 1,
+                                            overflow = FlowRowOverflow.Clip,
+                                            itemVerticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        ) {
+                                            note.tags.forEach { tag ->
+                                                Text(
+                                                    "#$tag",
+                                                    style = MaterialTheme.typography.labelSmall.copy(
+                                                        fontSize = 13.sp
+                                                    ),
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier
+                                                        .padding(start = 6.dp)
+                                                        .clickable {
+                                                            val wanted = "#$tag"
+                                                            onQueryChange(if (query == wanted) "" else wanted)
+                                                        }
+                                                )
+                                            }
                                         }
                                     }
                                 }

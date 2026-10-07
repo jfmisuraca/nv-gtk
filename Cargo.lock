@@ -969,7 +969,7 @@ dependencies = [
 
 [[package]]
 name = "nv-gtk"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "gtk4",
  "libadwaita",
@@ -981,7 +981,7 @@ dependencies = [
 
 [[package]]
 name = "nv_core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "dirs",

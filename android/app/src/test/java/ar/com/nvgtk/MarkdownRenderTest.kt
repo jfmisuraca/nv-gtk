@@ -59,6 +59,18 @@ class MarkdownRenderTest {
     }
 
     @Test
+    fun renderMarkdown_frontmatter_isStripped() {
+        val out = renderMarkdownAnnotated(
+            "---\ntitle: Meta\n---\n# Hola\n",
+            LINK,
+            CODE_BG
+        ).text
+        assertTrue(!out.contains("title:"))
+        assertTrue(!out.contains("Meta"))
+        assertTrue(out.contains("Hola"))
+    }
+
+    @Test
     fun renderMarkdown_emptyInput_staysEmpty() {
         assertEquals("", renderMarkdownAnnotated("", LINK, CODE_BG).text)
     }

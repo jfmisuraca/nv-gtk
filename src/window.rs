@@ -21,7 +21,7 @@ use nv_core::config::Config;
 use nv_core::search::search_notes;
 use nv_core::storage::StorageManager;
 use nv_core::util::timestamp_title;
-use nv_core::wiki::display_title_or_fallback;
+use nv_core::wiki::{display_title_or_fallback, strip_frontmatter};
 
 /// Sticky editor title: first non-blank content line, live from the buffer.
 /// Reuses the shared `nv_core::wiki` helper (same fallback `(nota vacía)`
@@ -356,6 +356,13 @@ fn ensure_preview_tags(buffer: &gtk4::TextBuffer, accent: &str, code_bg: &str) {
     wiki.set_foreground(Some(accent));
 }
 
+/// Spans de la preview del editor: como `markdown_spans` pero sobre el
+/// contenido ya sin frontmatter YAML (metadata, no visible). Pura —
+/// testeable sin display; `render_markdown_to_buffer` la usa.
+fn preview_spans(text: &str) -> Vec<RichSpan> {
+    markdown_spans(strip_frontmatter(text))
+}
+
 /// Renderiza markdown al buffer de preview (reemplazo total) y devuelve los
 /// rangos clickeables (offsets en caracteres). El buffer del editor no se
 /// toca: el contenido y el cursor se preservan solos.
@@ -369,7 +376,7 @@ fn render_markdown_to_buffer(
     buffer.set_text("");
     let mut links = Vec::new();
     let mut offset: i32 = 0;
-    for span in markdown_spans(text) {
+    for span in preview_spans(text) {
         let names: Vec<&str> = span.styles.iter().map(|s| md_tag_name(*s)).collect();
         let mut end = buffer.end_iter();
         buffer.insert_with_tags_by_name(&mut end, &span.text, &names);
@@ -2413,6 +2420,21 @@ mod tests {
     }
 
     #[test]
+    fn preview_spans_strips_frontmatter() {
+        let spans = preview_spans("---\ntitle: Meta\n---\n# Hola\n\nTexto **fuerte**.");
+        let text: String = spans.iter().map(|s| s.text.as_str()).collect();
+        assert!(
+            !text.contains("title:") && !text.contains("Meta"),
+            "frontmatter fuera de la preview: {text:?}"
+        );
+        assert!(text.contains("Hola") && text.contains("fuerte"));
+        // Sin cierre no hay strip: un `---` suelto sigue siendo regla.
+        let spans = preview_spans("---\n\n> cita\n");
+        let text: String = spans.iter().map(|s| s.text.as_str()).collect();
+        assert!(text.contains("───"), "regla intacta: {text:?}");
+    }
+
+    #[test]
     fn markdown_spans_renders_basic_subset() {
         let spans = markdown_spans(
             "# Título\n\nHola **negrita** y *itálica* con `código`.\n\n- uno\n- dos\n\n[enlace](https://ejemplo.com)\n",
@@ -2643,7 +2665,7 @@ mod tests {
             handles.editor_stack.visible_child_name().as_deref(),
             Some("editor")
         );
-        handles.text_view.buffer().set_text("# Hola\n\nTexto **fuerte**.");
+        handles.text_view.buffer().set_text("---\ntitle: Meta\n---\n# Hola\n\nTexto **fuerte**.");
         pump(20);
         (handles.toggle_preview)();
         pump(20);
@@ -2662,6 +2684,10 @@ mod tests {
             assert!(
                 !rendered.contains("**") && !rendered.contains('#'),
                 "renderizado, no crudo: {rendered:?}"
+            );
+            assert!(
+                !rendered.contains("title:") && !rendered.contains("Meta"),
+                "frontmatter fuera de la preview: {rendered:?}"
             );
         }
         assert!(!handles.preview_view.is_editable());

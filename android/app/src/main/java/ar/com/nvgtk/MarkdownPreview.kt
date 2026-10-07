@@ -106,7 +106,7 @@ fun renderMarkdownAnnotated(
             first = false
         }
         var inCodeBlock = false
-        for (rawLine in text.split('\n')) {
+        for (rawLine in stripFrontmatter(text).split('\n')) {
             val fence = rawLine.trimStart().startsWith("```")
             if (fence) {
                 inCodeBlock = !inCodeBlock

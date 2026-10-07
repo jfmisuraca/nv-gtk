@@ -137,9 +137,38 @@ pub fn display_title_or_fallback(content: &str) -> String {
     display_title_for(content).unwrap_or_else(|| EMPTY_DISPLAY_TITLE.to_string())
 }
 
-/// Preview shown next to a candidate: the first 4 content lines joined.
-pub fn preview_for(content: &str) -> String {
+/// Strips a leading YAML frontmatter block, if present.
+///
+/// Skips leading blank lines; the first non-blank line (trimmed) must be
+/// exactly `---`. The block ends at the first subsequent line trimmed to
+/// exactly `---`; everything through that closing line (inclusive) is
+/// removed. Without a closing line the content is returned intact, so a
+/// lone `---` keeps rendering as a horizontal rule.
+pub fn strip_frontmatter(content: &str) -> &str {
+    let mut offset = 0;
+    let mut seen_open = false;
+    for line in content.split_inclusive('\n') {
+        offset += line.len();
+        if !seen_open {
+            if line.trim().is_empty() {
+                continue;
+            }
+            if line.trim() == "---" {
+                seen_open = true;
+            } else {
+                return content;
+            }
+        } else if line.trim() == "---" {
+            return &content[offset..];
+        }
+    }
     content
+}
+
+/// Preview shown next to a candidate: the first 4 content lines joined,
+/// ignoring any leading YAML frontmatter block.
+pub fn preview_for(content: &str) -> String {
+    strip_frontmatter(content)
         .lines()
         .take(WIKI_PREVIEW_LINES)
         .collect::<Vec<_>>()
@@ -438,5 +467,42 @@ mod tests {
             resolve_wiki_target("(nota vacía)", &[source("e", "")]),
             None
         );
+    }
+
+    #[test]
+    fn strip_frontmatter_removes_yaml_block() {
+        let content = "---\ntitle: Hola\ntags: [a]\n---\nCuerpo visible\n";
+        assert_eq!(strip_frontmatter(content), "Cuerpo visible\n");
+    }
+
+    #[test]
+    fn strip_frontmatter_skips_leading_blank_lines() {
+        let content = "\n  \n---\ntitle: Hola\n---\nCuerpo\n";
+        assert_eq!(strip_frontmatter(content), "Cuerpo\n");
+    }
+
+    #[test]
+    fn strip_frontmatter_without_closing_returns_intact() {
+        // A lone `---` stays a horizontal rule: no closing, no strip.
+        let content = "---\n\n> cita\n";
+        assert_eq!(strip_frontmatter(content), content);
+    }
+
+    #[test]
+    fn strip_frontmatter_without_frontmatter_returns_intact() {
+        let content = "# Título\nCuerpo\n";
+        assert_eq!(strip_frontmatter(content), content);
+    }
+
+    #[test]
+    fn strip_frontmatter_only_block_returns_empty() {
+        assert_eq!(strip_frontmatter("---\ntitle: Hola\n---\n"), "");
+        assert_eq!(strip_frontmatter("---\n---\n"), "");
+    }
+
+    #[test]
+    fn preview_for_strips_frontmatter() {
+        let content = "---\ntitle: Hola\n---\nPrimera\nSegunda\n";
+        assert_eq!(preview_for(content), "Primera\nSegunda");
     }
 }
