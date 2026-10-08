@@ -4,6 +4,7 @@ import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.animateContentSize
@@ -336,6 +337,9 @@ private fun NvApp(
         },
     ) {
         composable("list") {
+            // Any search (tag click or typed): first Back clears it,
+            // second Back (empty query) exits via default behavior.
+            BackHandler(enabled = query.isNotEmpty()) { query = "" }
             NotesListScreen(
                 notes = results ?: notes,
                 filtering = results != null,
